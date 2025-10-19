@@ -3,7 +3,7 @@ import pickle
 import random
 
 import numpy as np
-
+from metrics.metrics_tracker import MetricsTracker
 
 # ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT']
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
@@ -15,7 +15,7 @@ def setup(self):
     Loads saved model if available for continued training.
     """
     model_path = "my-saved-model.pt"
-
+    self.name = "Q Learning"
     if os.path.isfile(model_path):
         print("Loading existing model for continued training...")
         with open(model_path, "rb") as file:
@@ -24,16 +24,25 @@ def setup(self):
         print("No existing model found. Starting new Q-table.")
         self.model = {}
 
+    self.metrics_tracker = MetricsTracker(
+        agent_name=self.name,
+        save_dir="metrics"
+    )
+    self.episode_counter = 0
+    # Track if episode is active
+    self.episode_active = False
+    self.current_step = 0
+    
     self.epsilon = getattr(self, "epsilon", 1.0)     # exploration rate
     
     # Hyperparameters
     # self.epsilon = max(0.05, self.epsilon * 0.995)  # exploration rate
-    self.eplison = 0.2
-    self.alpha = 0.1  # learning rate
-    self.gamma = 0.9  # discount factor
+    self.eplison = 0.1
+    self.alpha = 0.05  # learning rate
+    self.gamma = 0.95  # discount factor
 
 
-def act(self, game_state: dict) -> str:
+def act(self, game_state, events=[]) -> str:
     """
     Choose action using epsilon-greedy policy.
 
@@ -57,7 +66,160 @@ def act(self, game_state: dict) -> str:
     best_action = max(q_values, key=q_values.get)
 
     self.logger.debug(f"Exploiting: choosing action {best_action}")
+    
+    if not hasattr(self, 'metrics_tracker'):
+        self.metrics_tracker = MetricsTracker(
+            agent_name=self.name,
+            save_dir="metrics"
+        )
+        self.episode_counter = 0
+    
+    # =========================================================================
+    # START EPISODE ON FIRST STEP
+    # =========================================================================
+    if game_state and game_state.get('step', 0) == 1:
+        # Extract opponent information
+        opponent_names = []
+        if 'others' in game_state and game_state['others']:
+            for other in game_state['others']:
+                if other is not None:
+                    opponent_names.append(other[0])
+        
+        # Get episode ID from game state
+        self.episode_counter = game_state.get('round', self.episode_counter)
+        
+        # START THE EPISODE
+        self.metrics_tracker.start_episode(
+            episode_id=self.episode_counter,
+            opponent_types=opponent_names,
+            map_name="default",
+            scenario="gameplay"
+        )
+        
+        self.episode_active = True
+        self.current_step = 0
+        self.logger.debug(f"Started gameplay episode {self.episode_counter}")
+    
+    # =========================================================================
+    # CHECK FOR EPISODE END (AGENT ELIMINATED OR GAME OVER)
+    # =========================================================================
+    if game_state and self.episode_active:
+        # Check if this agent is dead/eliminated
+        agent_alive = True
+        
+        # Method 1: Check if 'self' exists in game_state
+        if 'self' not in game_state or game_state['self'] is None:
+            agent_alive = False
+        
+        # Method 2: Check for explicit dead flag (if your framework has it)
+        if 'dead' in game_state and game_state.get('dead', False):
+            agent_alive = False
+        
+        # Method 3: Check game state for end conditions
+        # The game might set 'round_finished' or similar
+        if game_state.get('round_finished', False):
+            agent_alive = False  # Treat as end
+        
+        # If agent died, end the episode
+        if not agent_alive and self.episode_active:
+            _end_gameplay_episode(self, game_state, died=True)
+    
+    # Increment step counter
+    if game_state:
+        self.current_step = game_state.get('step', self.current_step + 1)
+    
+    for event in events:
+        self.metrics_tracker.record_event(event)    
+    if hasattr(self, 'metrics_tracker') and self.metrics_tracker.current_episode:
+        self.metrics_tracker.record_action(best_action, is_valid=True)
     return best_action
+
+def _end_gameplay_episode(self, game_state, events, died=False):
+    """
+    Helper function to end episode during gameplay.
+    
+    Args:
+        game_state: Final game state
+        died: Whether agent died/was eliminated
+    """
+    if not hasattr(self, 'metrics_tracker') or not self.episode_active:
+        return
+    
+    if not self.metrics_tracker.current_episode:
+        return
+    
+    for event in events:
+        self.metrics_tracker.record_event(event)
+        
+    # Determine outcome
+    won = False
+    rank = 4  # Default to last place
+    
+    if not died:
+        # Agent survived - check if won
+        if 'others' in game_state and game_state['others']:
+            alive_opponents = sum(1 for o in game_state['others'] if o is not None)
+            won = (alive_opponents == 0)
+            rank = 1 if won else 2
+        else:
+            # No opponent info, assume won if survived
+            won = True
+            rank = 1
+    else:
+        # Agent died
+        won = False
+        if 'others' in game_state and game_state['others']:
+            alive_opponents = sum(1 for o in game_state['others'] if o is not None)
+            rank = alive_opponents + 2  # Finished below all alive opponents
+        else:
+            rank = 4
+    
+    survival_steps = self.current_step
+    total_steps = game_state.get('step', survival_steps) if game_state else survival_steps
+    
+    # End episode
+    self.metrics_tracker.end_episode(
+        won=won,
+        rank=rank,
+        survival_steps=survival_steps,
+        total_steps=total_steps,
+        metadata={
+            'mode': 'gameplay',
+            'died': died,
+            'episode': self.episode_counter
+        }
+    )
+    
+    self.episode_active = False
+    self.episode_counter += 1
+    
+    current_step = game_state.get('step')
+    self.metrics_tracker.end_episode(
+        won="WON" in events,
+        rank=rank,
+        survival_steps=current_step,
+        total_steps=400
+    )
+    self.metrics_tracker.save()
+    print(f"Ended gameplay episode: won={won}, rank={rank}, steps={survival_steps}")
+
+
+def end_of_round(self, last_game_state: dict, last_action: str, events: list):
+    """
+    Called at the end of each round during gameplay.
+    This is ONLY called in play mode, not during training.
+    """
+    print("End of round callback triggered.")
+    # If episode is still active, end it now
+    if hasattr(self, 'episode_active') and self.episode_active:
+        _end_gameplay_episode(self, last_game_state, events, died=False)
+    
+    # Log final events if you want to track them
+    if hasattr(self, 'metrics_tracker') and self.metrics_tracker.current_episode:
+        # This shouldn't happen since we ended the episode above,
+        # but just in case there's a timing issue
+        self.logger.warning("Episode still active in end_of_round - ending now")
+        _end_gameplay_episode(self, last_game_state, events, died=False)
 
 def state_to_features(game_state: dict) -> tuple:
     """

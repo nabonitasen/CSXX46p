@@ -18,6 +18,7 @@ AGENT_API = {
     "callbacks": {
         "setup": ["self"],
         "act": ["self", "game_state: dict"],
+        # "end_of_round": ["self", "last_game_state: dict", "last_action: str", "events: list"],
     },
     "train": {
         "setup_training": ["self"],

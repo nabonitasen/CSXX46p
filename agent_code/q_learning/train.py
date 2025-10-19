@@ -3,7 +3,7 @@ import numpy as np
 from typing import List
 import events as e
 from .callbacks import state_to_features, ACTIONS
-
+from metrics.metrics_tracker import MetricsTracker
 
 def setup_training(self):
     """
@@ -12,16 +12,26 @@ def setup_training(self):
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     self.logger.info("Setting up training mode.")
-
+    self.name = "Q Learning"
     # Track some statistics for debugging
     self.round_rewards = []
     self.total_reward = 0
 
     # Epsilon decay parameters
-    self.epsilon_start = 0.9
-    self.epsilon_end = 0.05
-    self.epsilon_decay = 0.995
+    self.epsilon_start = 0.1
+    self.epsilon_end = 0.1
+    self.epsilon_decay = 0
     self.epsilon = self.epsilon_start
+    # Ensure metrics tracker exists
+    if not hasattr(self, 'metrics_tracker'):
+        
+        self.metrics_tracker = MetricsTracker(
+            agent_name=self.name,
+            save_dir="metrics"
+        )
+        self.episode_counter = 0
+    
+    self.logger.info("Training setup complete")
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str,
@@ -36,10 +46,32 @@ def game_events_occurred(self, old_game_state: dict, self_action: str,
     """
 
     self.logger.debug(f'Encountered game event(s): {", ".join(map(repr, events))}')
-
+    # print(f'Encountered game event(s): {", ".join(map(repr, events))}')
     # === Add custom shaping events ===
     events = add_custom_events(old_game_state, new_game_state, events)
 
+    # =========================================================================
+    # START EPISODE ON FIRST STEP - THIS IS THE KEY ADDITION!
+    # =========================================================================
+    if old_game_state:
+        if old_game_state.get('step', 0) == 1:
+            # Extract opponent information
+            opponent_names = []
+            if 'others' in old_game_state and old_game_state['others']:
+                for other in old_game_state['others']:
+                    if other is not None:
+                        # other is typically (name, score, bomb_available, (x, y))
+                        opponent_names.append(other[0])
+            self.episode_counter=old_game_state.get('round')
+            # START THE EPISODE
+            self.metrics_tracker.start_episode(
+                episode_id=self.episode_counter,
+                opponent_types=opponent_names,
+                scenario="training"
+            )
+            
+            self.logger.debug(f"Started episode {self.episode_counter} with opponents: {opponent_names}")
+            
     # === Compute reward ===
     reward = reward_from_events(self, events)
     self.total_reward = getattr(self, "total_reward", 0) + reward
@@ -47,7 +79,13 @@ def game_events_occurred(self, old_game_state: dict, self_action: str,
     # === Feature extraction ===
     old_features = state_to_features(old_game_state)
     new_features = state_to_features(new_game_state)
-
+    
+    # =========================================================================
+    # TRACK ACTION
+    # =========================================================================
+    if hasattr(self, 'metrics_tracker') and self.metrics_tracker.current_episode:
+        self.metrics_tracker.record_action(self_action, is_valid=True)
+        
     # === Skip invalid feature transitions ===
     if old_features is None or new_features is None:
         self.logger.warning("Skipping Q-update due to invalid (None) features.")
@@ -107,7 +145,22 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         with open("my-saved-model.pt", "wb") as file:
             pickle.dump(self.model, file)
         self.logger.info("Model saved.")
+    won = False
+    rank = 4
 
+    if e.SURVIVED_ROUND in events:
+        if 'others' in last_game_state:
+            alive_opponents = sum(1 for o in last_game_state['others'] if o)
+            won = (alive_opponents == 0)
+            rank = 1 if won else 2
+    current_step = last_game_state.get('step')
+    self.metrics_tracker.end_episode(
+        won="WON" in events,
+        rank=rank,
+        survival_steps=current_step,
+        total_steps=400
+    )
+    self.metrics_tracker.save()
 
 def update_q_value(self, state, action, reward, next_state):
     """
@@ -217,9 +270,14 @@ def reward_from_events(self, events: list) -> int:
         'ESCAPED_DANGER': +2.0,
         'SAFE_MOVE': +0.3,   # Encourage movement instead of waiting
     }
-
+    reward_sum=0
     # === Compute base reward from listed events ===
-    reward_sum = sum(game_rewards.get(ev, 0) for ev in events)
+    for event in events:
+        event_reward = game_rewards.get(event, 0)
+        reward_sum += event_reward
+        
+        self.metrics_tracker.record_event(event, reward=event_reward)
+        
 
     # === Optional dynamic shaping (state-aware bonuses) ===
     # Add this *only if you pass `self.prev_game_state` in your agent loop
