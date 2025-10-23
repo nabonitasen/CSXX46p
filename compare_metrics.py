@@ -18,8 +18,8 @@ data = pickle.load(open("agent_code/ppo/metrics/ppo_3.pkl", "rb"))
 # Load multiple agents
 trackers = []
 metrics_dictionary = {
-    'q_learning': 'q_learning_3.pkl',
-    'ppo': 'ppo_3.pkl',
+    'q_learning': 'Q Learning_8000.pkl',
+    # 'ppo': 'ppo_3.pkl',
 }
 for agent, file in metrics_dictionary.items():
     tracker = MetricsTracker(agent_name=agent, save_dir = f"agent_code/{agent}/metrics")
@@ -32,7 +32,7 @@ comparator = AgentComparator(trackers)
 
 # Generate comprehensive report
 report = comparator.generate_comparison_report(
-    output_file="metrics/comparison_results/report.txt"
+    output_file="metrics/comparison_results/q_learning.txt"
 )
 print(report)
 

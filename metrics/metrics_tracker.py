@@ -172,7 +172,7 @@ class MetricsTracker:
         if not game_rewards:
             reward = self.game_rewards.get(event, 0)
             
-        print(f"Recording event: {event} with reward {reward}")
+        # print(f"Recording event: {event} with reward {reward}")
         self.episode_events.append(event)
         
         # Update reward breakdown
@@ -214,7 +214,7 @@ class MetricsTracker:
             total_steps: Total episode length
             metadata: Additional metadata to store
         """
-        print("Ending episode and finalizing metrics.")
+        # print("Ending episode and finalizing metrics.")
         if self.current_episode is None:
             return
         
@@ -488,7 +488,7 @@ class MetricsTracker:
                 'episode_count': self.episode_count,
             }, f)
         
-        print(f"Metrics saved to {filepath}")
+        # print(f"Metrics saved to {filepath}")
         
         # Also save JSON summary
         summary_path = filepath.replace('.pkl', '_summary.json')
@@ -518,7 +518,7 @@ class MetricsTracker:
             self._update_running_stats()
         self.current_episode = None
         
-        print(f"Loaded {len(self.episodes)} episodes for agent '{self.agent_name}'")
+        # print(f"Loaded {len(self.episodes)} episodes for agent '{self.agent_name}'")
     
     def export_to_csv(self, filename: Optional[str] = None):
         """
