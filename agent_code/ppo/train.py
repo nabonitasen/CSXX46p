@@ -16,37 +16,45 @@ from metrics.metrics_tracker import MetricsTracker
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 MODEL_PATH = "models/ppo_agent.pth"  # consistent save/load location
+
+# ===================================================================
+# NORMALIZED REWARDS: All values scaled to [-1, 1] range
+# Scaling factor: 1/500 (max absolute value was 500)
+# Relative proportions are EXACTLY preserved
+# ===================================================================
 GAME_REWARDS = {
-    "COIN_COLLECTED": 80.0,          # PHASE 2.5: Secondary goal
-    "KILLED_OPPONENT": 200.0,        # Not relevant yet (solo training)
-    "CRATE_DESTROYED": 50.0,         # REDUCED - survival more important than crates!
-    "BOMB_DROPPED": 0.0,             # NEUTRAL - let outcomes determine value
+    "COIN_COLLECTED": 0.2,           # Good reward (was 100.0 → 100/500 = 0.2)
+    "KILLED_OPPONENT": 0.0,          # Not relevant (solo)
+    "CRATE_DESTROYED": 0.08,         # Good reward but less than coins (was 40.0 → 40/500 = 0.08)
+    "BOMB_DROPPED": 0.0,             # Neutral
     "BOMB_EXPLODED": 0.0,
-    "KILLED_SELF": -800.0,           # MASSIVE PENALTY - death must be avoided!
-    "GOT_KILLED": -150.0,            # Not relevant (solo)
-    "INVALID_ACTION": -10.0,         # Penalty for invalid actions
-    "WAITED": -0.5,                  # Very gentle - don't over-penalize caution
-    "SURVIVED_ROUND": 600.0,         # HUGE - survival is PRIMARY GOAL!
-    "MOVED_UP": 0.0,                 # No reward for basic movement
+    "KILLED_SELF": -1.0,             # Worst outcome (was -500.0 → -500/500 = -1.0)
+    "GOT_KILLED": 0.0,               # Not relevant (solo)
+    "INVALID_ACTION": -0.02,         # Small penalty for invalid actions (was -10.0 → -10/500 = -0.02)
+    "WAITED": 0.0,                   # No penalty
+    "SURVIVED_ROUND": 0.8,           # Very important (was 400.0 → 400/500 = 0.8)
+    "MOVED_UP": 0.0,
     "MOVED_RIGHT": 0.0,
     "MOVED_DOWN": 0.0,
     "MOVED_LEFT": 0.0,
 }
 
-# PHASE 2.5 REWARDS: SURVIVAL FIRST, gentle introduction to bombing
-STEP_ALIVE_REWARD = 0.7              # VERY HIGH - every step alive is precious
-DANGER_PENALTY = -0.5                # VERY GENTLE - allow learning through risks
-ESCAPED_DANGER_REWARD = 80.0         # MASSIVE - escaping is critical!
-SAFE_BOMB_REWARD = 120.0             # HUGE - successful bombing is jackpot
-BOMB_STAY_PENALTY = -40.0            # SEVERE - must move away immediately
-UNSAFE_BOMB_PENALTY = -20.0          # Moderate penalty
-MOVING_TO_SAFETY_REWARD = 50.0       # MASSIVE - reward every escape step!
+# ===================================================================
+# NORMALIZED SHAPED REWARDS: Scaled to [-1, 1] with proportions preserved
+# ===================================================================
+STEP_ALIVE_REWARD = 0.0              # REMOVED - no passive rewards
+DANGER_PENALTY = 0.0                 # REMOVED
+ESCAPED_DANGER_REWARD = 0.3          # STRONG REWARD - escaping is critical! (was 150.0 → 150/500 = 0.3)
+SAFE_BOMB_REWARD = 0.4               # VERY STRONG - successful bombing highly rewarding (was 200.0 → 200/500 = 0.4)
+BOMB_STAY_PENALTY = 0.0              # REMOVED - death penalty handles this
+UNSAFE_BOMB_PENALTY = 0.0            # REMOVED
+MOVING_TO_SAFETY_REWARD = 0.0        # REMOVED
 
-# PHASE 2.5 SHAPED REWARDS: Strong escape focus
-CRATE_IN_RANGE_REWARD = 10.0         # Moderate - don't over-encourage risky bombs
-APPROACHING_COIN_REWARD = 10.0       # Maintain coin collection
-SAFE_POSITION_REWARD = 0.5           # Good bonus for safety
-EXPLORATION_BONUS = 2.0              # Explore to find opportunities
+# MINIMAL SHAPED REWARDS: Encourage incremental progress toward goals
+CRATE_IN_RANGE_REWARD = 0.03         # Encourage strategic bombing (was 15.0 → 15/500 = 0.03)
+APPROACHING_COIN_REWARD = 0.05       # Make coin collection attractive (was 25.0 → 25/500 = 0.05)
+SAFE_POSITION_REWARD = 0.0           # REMOVED
+EXPLORATION_BONUS = 0.006            # Encourage exploration (was 3.0 → 3/500 = 0.006)
 
 # --------------------------------------------------------------------------------
 # Helper Functions for Reward Shaping

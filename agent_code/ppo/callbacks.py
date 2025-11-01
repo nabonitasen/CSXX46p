@@ -221,8 +221,8 @@ def can_safely_escape_bomb(
         # Skip starting position (will be dangerous after bomb drop)
         if steps > 0:
             # Found safe tile within time limit?
-            # STRICTER: Require VERY safe position (50% of threshold)
-            if simulated_danger[cx, cy] < (danger_threshold * 0.5) and explosion_map[cx, cy] == 0:
+            # NUCLEAR OPTION: Moderately safe (70% - balance safety and learning)
+            if simulated_danger[cx, cy] < (danger_threshold * 0.70) and explosion_map[cx, cy] == 0:
                 return True
 
         # Don't search beyond bomb timer
