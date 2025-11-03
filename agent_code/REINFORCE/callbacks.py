@@ -46,7 +46,7 @@ def setup(self):
     self.name = "REINFORCE"
 
     # Hyperparameters
-    self.state_size = 291  # Will be determined by state_to_features
+    self.state_size = 297  # Will be determined by state_to_features
     self.action_size = len(ACTIONS)
     self.hidden_size = 128
     self.learning_rate = 1e-4
@@ -94,11 +94,109 @@ def act(self, game_state: dict) -> str:
     return ACTIONS[action_idx]
 
 def state_to_features(game_state: dict) -> np.array:
-    board = np.array(game_state["field"]).flatten()
-    position = np.array(game_state["self"][3], dtype=np.float32)
+    _, score, bomb_available, (x, y) = game_state['self']
+    field = game_state['field']
+    bombs = game_state['bombs']
+    explosion_map = game_state['explosion_map']
+    coins = game_state['coins']
+    features = []
+
+    #add board
+    board = np.array(field).flatten()
+    features.extend(board.astype(np.float32))
+
+    # 2. Agent position (normalized to [0, 1])
+    field_size = field.shape[0]
+    features.append(x / field_size)
+    features.append(y / field_size)
+
+    # 3. Nearest coin information (4 features)
+    coin_features = get_nearest_coin_features(x, y, coins, field_size)
+    features.extend(coin_features)
+
+    # 4. Bomb availability (1 feature)
+    features.append(1.0 if bomb_available else 0.0)
+
+    # 5. Danger level at current position (1 feature)
+    danger = get_danger_level(x, y, bombs, explosion_map)
+    features.append(danger)
+
+    return np.array(features, dtype=np.float32)
 
 
-    # optional: bombs, coins, others — extend as required
+def get_nearest_coin_features(x, y, coins, field_size):
+    """
+    Get features for the nearest coin.
+    Returns: [relative_x, relative_y, distance, exists]
 
-    features = np.concatenate([board.astype(np.float32), position.astype(np.float32)])
-    return features
+    :param x: Agent x position
+    :param y: Agent y position
+    :param coins: List of coin positions
+    :param field_size: Size of the field for normalization
+    :return: List of 4 features
+    """
+    if len(coins) == 0:
+        return [0.0, 0.0, 0.0, 0.0]  # No coin exists
+
+    # Find nearest coin
+    min_distance = float('inf')
+    nearest_coin = None
+
+    for coin in coins:
+        cx, cy = coin if isinstance(coin, tuple) else (coin[0], coin[1])
+        distance = abs(cx - x) + abs(cy - y)  # Manhattan distance
+
+        if distance < min_distance:
+            min_distance = distance
+            nearest_coin = (cx, cy)
+
+    if nearest_coin is None:
+        return [0.0, 0.0, 0.0, 0.0]
+
+    cx, cy = nearest_coin
+    # Relative position (normalized)
+    rel_x = (cx - x) / field_size
+    rel_y = (cy - y) / field_size
+
+    # Distance (normalized)
+    norm_distance = min_distance / (2 * field_size)
+
+    # Exists flag
+    exists = 1.0
+
+    return [rel_x, rel_y, norm_distance, exists]
+
+
+def get_danger_level(x, y, bombs, explosion_map):
+    """
+    Calculate danger level at position (x, y).
+    Returns value between 0 (safe) and 1 (very dangerous).
+
+    :param x: X position
+    :param y: Y position
+    :param bombs: List of bombs [(position, timer), ...]
+    :param explosion_map: Map of current explosions
+    :return: Danger level (0.0 to 1.0)
+    """
+    # Currently exploding
+    if explosion_map[x, y] > 0:
+        return 1.0
+
+    # Check bombs
+    max_danger = 0.0
+
+    for (bx, by), timer in bombs:
+        # Check if in blast line (same row or column within range 3)
+        in_blast_line = (bx == x and abs(by - y) <= 3) or (by == y and abs(bx - x) <= 3)
+
+        if in_blast_line:
+            # Manhattan distance to bomb
+            dist = abs(bx - x) + abs(by - y)
+
+            # Danger increases with proximity and decreases with timer
+            # If bomb is about to explode (timer=1) and close (dist=1): high danger
+            # If bomb is far away (timer=4) and distant (dist=3): low danger
+            danger = (4 - dist) / 4.0 * (5 - timer) / 5.0
+            max_danger = max(max_danger, danger)
+
+    return max_danger

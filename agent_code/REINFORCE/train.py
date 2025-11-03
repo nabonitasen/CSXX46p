@@ -47,6 +47,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str,
     """
     self.logger.debug(f'Events: {", ".join(events)}')
 
+    # Add custom events based on state changes
+    events = add_custom_events(old_game_state, new_game_state, events)
+
     # Calculate reward
     reward = reward_from_events(events)
 
@@ -149,6 +152,125 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         self.logger.info("Model saved.")
 
 
+def add_custom_events(old_game_state, new_game_state, events):
+    """
+    Add custom events to provide more detailed feedback.
+
+    Custom events:
+    - MOVED_TOWARDS_COIN: Agent moved closer to nearest coin
+    - MOVED_AWAY_FROM_COIN: Agent moved farther from nearest coin
+    - ESCAPED_DANGER: Agent moved from dangerous area to safe area
+    - MOVED_INTO_DANGER: Agent moved from safe area to dangerous area
+    - BOMB_NEAR_CRATE: Agent placed bomb next to crate(s)
+
+    :param old_game_state: Previous state
+    :param new_game_state: Current state
+    :param events: List of events that occurred
+    :return: Updated events list
+    """
+    if old_game_state is None or new_game_state is None:
+        return events
+
+    old_x, old_y = old_game_state['self'][3]
+    new_x, new_y = new_game_state['self'][3]
+
+    # Custom event 1: Moved towards/away from coin
+    old_coins = old_game_state['coins']
+    new_coins = new_game_state['coins']
+
+    if len(old_coins) > 0 and len(new_coins) > 0:
+        # Calculate distance to nearest coin in both states
+        old_min_dist = min(abs(cx - old_x) + abs(cy - old_y) for cx, cy in old_coins)
+        new_min_dist = min(abs(cx - new_x) + abs(cy - new_y) for cx, cy in new_coins)
+
+        if new_min_dist < old_min_dist:
+            events.append('MOVED_TOWARDS_COIN')
+        elif new_min_dist > old_min_dist:
+            events.append('MOVED_AWAY_FROM_COIN')
+
+    # Custom event 2: Danger management
+    old_explosion_map = old_game_state['explosion_map']
+    new_explosion_map = new_game_state['explosion_map']
+    old_bombs = old_game_state['bombs']
+    new_bombs = new_game_state['bombs']
+
+    old_danger = is_in_danger(old_x, old_y, old_bombs, old_explosion_map)
+    new_danger = is_in_danger(new_x, new_y, new_bombs, new_explosion_map)
+
+    if old_danger and not new_danger:
+        events.append('ESCAPED_DANGER')
+    elif not old_danger and new_danger:
+        events.append('MOVED_INTO_DANGER')
+
+    # Custom event 3: Bomb placement near crates
+    if e.BOMB_DROPPED in events:
+        old_field = old_game_state['field']
+        crates_nearby = count_crates_nearby(old_x, old_y, old_field)
+
+        if crates_nearby > 0:
+            events.append('BOMB_NEAR_CRATE')
+
+            # Extra reward for multiple crates
+            if crates_nearby >= 2:
+                events.append('BOMB_MULTI_CRATE')
+
+    return events
+
+
+def is_in_danger(x, y, bombs, explosion_map):
+    """
+    Check if position is in danger zone.
+
+    :param x: X position
+    :param y: Y position
+    :param bombs: List of bombs
+    :param explosion_map: Current explosion map
+    :return: True if in danger, False otherwise
+    """
+    # Currently exploding
+    if explosion_map[x, y] > 0:
+        return True
+
+    # In bomb blast radius
+    for (bx, by), timer in bombs:
+        if bx == x and abs(by - y) <= 3:
+            return True
+        if by == y and abs(bx - x) <= 3:
+            return True
+
+    return False
+
+
+def count_crates_nearby(x, y, field):
+    """
+    Count number of crates within bomb blast radius.
+
+    :param x: X position
+    :param y: Y position
+    :param field: Game field
+    :return: Number of crates
+    """
+    crate_count = 0
+
+    # Check in 4 directions (up, right, down, left) within range 3
+    for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+        for distance in range(1, 4):  # Blast radius of 3
+            nx, ny = x + dx * distance, y + dy * distance
+
+            # Check bounds
+            if nx < 0 or nx >= field.shape[0] or ny < 0 or ny >= field.shape[1]:
+                break
+
+            # Wall blocks blast
+            if field[nx, ny] == -1:
+                break
+
+            # Count crate
+            if field[nx, ny] == 1:
+                crate_count += 1
+
+    return crate_count
+
 def reward_from_events(events: List[str]) -> float:
     """
     Simple reward function.
@@ -157,13 +279,30 @@ def reward_from_events(events: List[str]) -> float:
     :return: Total reward
     """
     game_rewards = {
-        e.COIN_COLLECTED: 10,
+        e.COIN_COLLECTED: 20,
         e.KILLED_OPPONENT: 50,
         e.KILLED_SELF: -50,
         e.GOT_KILLED: -30,
         e.INVALID_ACTION: -2,
-        e.WAITED: -0.1,
+        e.WAITED: -2,
         e.CRATE_DESTROYED: 2,
+        e.SURVIVED_ROUND: 0.1,
+
+        # Official game events (medium impact)
+        e.CRATE_DESTROYED: 3.0,
+        e.BOMB_DROPPED: 0.0,  # Neutral, context matters
+
+        # Custom events (movement)
+        'MOVED_TOWARDS_COIN': 0.2,
+        'MOVED_AWAY_FROM_COIN': -0.2,
+
+        # Custom events (danger management)
+        'ESCAPED_DANGER': 5.0,
+        'MOVED_INTO_DANGER': -8.0,
+
+        # Custom events (strategic bombing)
+        'BOMB_NEAR_CRATE': 2.0,
+        'BOMB_MULTI_CRATE': 3.0,
     }
 
     reward_sum = 0
