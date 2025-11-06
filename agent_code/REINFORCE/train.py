@@ -49,6 +49,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str,
 
     # Add custom events based on state changes
     events = add_custom_events(old_game_state, new_game_state, events)
+    for event in events:
+        event_name = event if isinstance(event, str) else getattr(event, 'name', str(event))
+        self.metrics_tracker.record_event(event_name)
+        self.logger.debug(f"Recorded event: {event_name}")
 
     # Calculate reward
     reward = reward_from_events(events)
@@ -150,6 +154,22 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, "my-saved-model.pth")
         self.logger.info("Model saved.")
+    rank = 4
+    if e.SURVIVED_ROUND in events and "others" in last_game_state:
+        alive = sum(1 for o in last_game_state["others"] if o)
+        won = alive == 0
+        rank = 1 if won else 2
+    # === Record episode end ===
+    current_step = last_game_state.get("step", 0)
+    self.metrics_tracker.end_episode(
+        won="WON" in events,
+        rank=rank,
+        survival_steps=current_step,
+        total_steps=400
+    )
+
+
+    self.metrics_tracker.save()
 
 
 def add_custom_events(old_game_state, new_game_state, events):
@@ -293,8 +313,8 @@ def reward_from_events(events: List[str]) -> float:
         e.BOMB_DROPPED: 0.0,  # Neutral, context matters
 
         # Custom events (movement)
-        'MOVED_TOWARDS_COIN': 0.2,
-        'MOVED_AWAY_FROM_COIN': -0.2,
+        # 'MOVED_TOWARDS_COIN': 0.01,
+        # 'MOVED_AWAY_FROM_COIN': -0.01,
 
         # Custom events (danger management)
         'ESCAPED_DANGER': 5.0,

@@ -45,6 +45,12 @@ def setup(self):
     model_path = "my-saved-model.pth"
     self.name = "REINFORCE"
 
+    # Metrics tracker
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="metrics")
+    self.episode_counter = 0
+    self.episode_active = False
+    self.current_step = 0
+
     # Hyperparameters
     self.state_size = 297  # Will be determined by state_to_features
     self.action_size = len(ACTIONS)
@@ -78,6 +84,35 @@ def act(self, game_state: dict) -> str:
     if features is None:
         self.logger.warning("Features are None, choosing random action")
         return np.random.choice(ACTIONS)
+    # =========================================================================
+    # START EPISODE ON FIRST STEP (ONLY FOR GAMEPLAY MODE, NOT TRAINING)
+    # =========================================================================
+    # Note: During training mode, train.py handles episode start/end
+    # This block is ONLY for pure gameplay mode (no --train flag)
+    if game_state and game_state.get('step', 0) == 1 and not self.episode_active:
+        # Extract opponent information
+        opponent_names = []
+        if 'others' in game_state and game_state['others']:
+            for other in game_state['others']:
+                if other is not None:
+                    opponent_names.append(other[0])
+
+        # Get episode ID from game state
+        self.episode_counter = game_state.get('round', self.episode_counter)
+
+        # START THE EPISODE (only if not already started by train.py)
+        # Check if we're in training mode by seeing if train.py started it already
+        if not self.metrics_tracker.current_episode:
+            self.metrics_tracker.start_episode(
+                episode_id=self.episode_counter,
+                opponent_types=opponent_names,
+                map_name="default",
+                scenario="gameplay"
+            )
+            self.logger.debug(f"Started gameplay episode {self.episode_counter}")
+
+        self.episode_active = True
+        self.current_step = 0
 
     # Get action from policy
     if self.train:
@@ -90,7 +125,8 @@ def act(self, game_state: dict) -> str:
         # During evaluation: take most probable action (greedy)
         with torch.no_grad():
             action_idx, log_prob = self.policy.act(features)
-
+    if hasattr(self, 'metrics_tracker'):
+        self.metrics_tracker.record_action(ACTIONS[action_idx], is_valid=True)
     return ACTIONS[action_idx]
 
 def state_to_features(game_state: dict) -> np.array:
