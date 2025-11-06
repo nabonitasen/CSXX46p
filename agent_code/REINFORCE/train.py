@@ -46,6 +46,29 @@ def game_events_occurred(self, old_game_state: dict, self_action: str,
     :param events: Events that occurred
     """
     self.logger.debug(f'Events: {", ".join(events)}')
+     # Add episode tracking like PPO
+    if old_game_state:
+        if old_game_state.get('step', 0) == 1:
+            # Extract opponent information
+            opponent_names = []
+            if 'others' in old_game_state and old_game_state['others']:
+                for other in old_game_state['others']:
+                    if other is not None:
+                        opponent_names.append(other[0])
+            
+            self.episode_counter = old_game_state.get('round')
+            # Start episode tracking
+            self.metrics_tracker.start_episode(
+                episode_id=self.episode_counter,
+                opponent_types=opponent_names,
+                scenario="training"
+            )
+
+            # Reset exploration tracking
+            self.visited_positions = set()
+            self.last_coin_distance = None
+            
+            self.logger.debug(f"Started episode {self.episode_counter} with opponents: {opponent_names}")
 
     # Add custom events based on state changes
     events = add_custom_events(old_game_state, new_game_state, events)
@@ -167,9 +190,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         survival_steps=current_step,
         total_steps=400
     )
+    self.episode_active = False
+    self.episode_counter += 1
 
-
-    self.metrics_tracker.save()
+    # self.metrics_tracker.save()
 
 
 def add_custom_events(old_game_state, new_game_state, events):
