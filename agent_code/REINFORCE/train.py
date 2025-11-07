@@ -193,7 +193,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.episode_active = False
     self.episode_counter += 1
 
-    # self.metrics_tracker.save()
+    self.metrics_tracker.save()
 
 
 def add_custom_events(old_game_state, new_game_state, events):
