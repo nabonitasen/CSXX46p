@@ -11,9 +11,9 @@ def act_rulebased(self):
     
     Q = np.dot(self.action_array, self.features)
     action = ACTIONS[np.argmax(Q)]
-    print()
-    print(np.array([ACTIONS, Q]).T)
-    print(f"--> {action}")
+    # print()
+    # print(np.array([ACTIONS, Q]).T)
+    # print(f"--> {action}")
     return action
 
 def initialize_rule_based(self):
