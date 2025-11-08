@@ -30,20 +30,27 @@ import copy
 TRAIN_FROM_SCRETCH = True
 LOAD = 'end_long_training'
 # LOAD = 'end_coin_training_1'
-SAVE = 'last_save' 
+SAVE = 'last_save'
 
-EPSILON = (0.5,0.05)
-LINEAR_CONSTANT_QUOTIENT = 0.9
+# Exploration: Start with full exploration (1.0) and decay to 0.01
+# Higher initial exploration helps agent discover diverse strategies
+EPSILON = (1.0, 0.01)
+LINEAR_CONSTANT_QUOTIENT = 0.85  # 85% linear decay, 15% constant at min epsilon
 
-DISCOUNTING_FACTOR = 0.6
-BUFFERSIZE = 2000 
-BATCH_SIZE = 120 
+# Discount factor: 0.95 for better long-term planning (was 0.6 - too myopic!)
+# Bomberman requires planning ahead (bomb timing, escape routes, strategic positioning)
+DISCOUNTING_FACTOR = 0.95
+
+# Experience Replay: Larger buffer for more diverse experiences
+BUFFERSIZE = 10000  # Increased from 2000 to store more varied situations
+BATCH_SIZE = 256    # Increased from 120 for more stable gradients
 
 LOSS_FUNCTION = nn.MSELoss()
 OPTIMIZER = optim.Adam
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0005  # Slightly lower for more stable learning (was 0.001)
 
-TRAINING_EPISODES = 20000
+# Training episodes: Increased for more thorough learning
+TRAINING_EPISODES = 50000  # Increased from 20000
 
 
 
