@@ -4,22 +4,16 @@
 
 ### 1. **Network Architecture** ([Model.py](Model.py))
 
-**BEFORE:**
+**KEPT ORIGINAL:**
 ```
 23 → 60 → 6  (Single hidden layer, ~1,800 parameters)
 ```
 
-**AFTER:**
-```
-23 → 128 → 128 → 64 → 6  (3 hidden layers, ~21,000 parameters)
-+ Dropout (0.2) for regularization
-```
-
 **Rationale:**
-- Original network was too shallow for complex Bomberman strategy
-- Deeper network can learn better feature representations
-- Dropout prevents overfitting during extended training
-- ~12x more parameters for richer learning capacity
+- Simple architecture works well with hand-crafted features
+- Faster training and inference
+- Less prone to overfitting with limited data
+- Original design was already well-tuned
 
 ---
 
@@ -164,17 +158,17 @@ Die without achievement    | -700
 - **Before:** Short-sighted decisions (γ=0.6)
 - **After:** Plans ahead for bomb timing, escapes, positioning (γ=0.95)
 
-### 3. **Learning Quality**
-- **Before:** Shallow network, limited capacity
-- **After:** Deep network learns complex patterns
+### 3. **Learning Stability**
+- **Before:** Small batches (120), high variance
+- **After:** Large batches (256), stable gradients
 
 ### 4. **Exploration Coverage**
 - **Before:** 50% initial exploration missed strategies
 - **After:** 100% initial exploration finds diverse tactics
 
-### 5. **Training Stability**
-- **Before:** Small batches, high variance
-- **After:** Large batches, stable gradients
+### 5. **Experience Diversity**
+- **Before:** Small buffer (2k), limited variety
+- **After:** Large buffer (10k), diverse situations
 
 ---
 
@@ -307,8 +301,7 @@ For even better results, train in stages with increasing difficulty:
 
 | Parameter | Old | New | Improvement |
 |-----------|-----|-----|-------------|
-| **Network depth** | 1 layer | 3 layers | +200% |
-| **Network params** | 1,800 | 21,000 | +1,067% |
+| **Network architecture** | 23→60→6 | 23→60→6 | ✓ Kept original |
 | **Discount (γ)** | 0.6 | 0.95 | +58% |
 | **Buffer size** | 2,000 | 10,000 | +400% |
 | **Batch size** | 120 | 256 | +113% |
