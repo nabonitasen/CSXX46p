@@ -865,3 +865,158 @@ def next_action_for_coin(field: np.ndarray, self_info, coin: Tuple[int,int],
         return "WAIT"
     return next_action_toward(path[0], path[1])
 
+
+## Opponent Analysis
+def analyze_opponent_state(field: np.ndarray,
+                          opponent_info: Tuple,
+                          our_info: Tuple,
+                          bombs: List,
+                          coins: List[Tuple[int, int]],
+                          explosions: np.ndarray,
+                          opponent_history: Optional[List] = None) -> Dict:
+    """
+    Analyze a single opponent's tactical situation.
+
+    Args:
+        field: Game arena (17x17)
+        opponent_info: (name, score, bombs_left, (x, y))
+        our_info: Our agent's info tuple (name, score, bombs_left, (x, y))
+        bombs: List of active bombs
+        coins: List of coin positions
+        explosions: Explosion map
+        opponent_history: Last N positions/actions of this opponent
+
+    Returns:
+        Dict containing opponent analysis features
+    """
+    # Extract opponent information
+    opp_name, opp_score, opp_bombs_left, (opp_x, opp_y) = opponent_info
+    our_name, our_score, our_bombs_left, (our_x, our_y) = our_info
+
+    # 1. Position & Distance
+    distance_to_us = manhattan((opp_x, opp_y), (our_x, our_y))
+
+    # 2. Valid moves for opponent (reuse existing function)
+    opp_valid_moves = check_valid_movement(field.copy(), opponent_info, bombs)
+
+    # 3. Danger assessment (reuse existing function)
+    opp_danger = check_bomb_radius_and_escape(field, opponent_info, bombs, explosions)
+    in_danger = opp_danger.get('in_danger') == "yes"
+    escape_routes = []
+    if in_danger:
+        escape_action = opp_danger.get('escape_bomb_action', 'WAIT')
+        if escape_action != 'WAIT':
+            escape_routes.append(escape_action)
+
+    # 4. Resources
+    score_diff = opp_score - our_score
+
+    # 5. Movement history
+    last_3_actions = []
+    if opponent_history:
+        last_3_actions = opponent_history[-3:]
+
+    # 6. Intent - nearest coin direction
+    nearest_coin_direction = None
+    if coins:
+        opp_dist_map = bfs_distance(field, (opp_x, opp_y), explosions)
+        reachable_coins = []
+        for coin in coins:
+            cx, cy = coin
+            if in_bounds(field, cx, cy) and np.isfinite(opp_dist_map[cx, cy]):
+                reachable_coins.append((coin, opp_dist_map[cx, cy]))
+
+        if reachable_coins:
+            # Sort by distance
+            reachable_coins.sort(key=lambda x: x[1])
+            nearest_coin = reachable_coins[0][0]
+            # Find path to nearest coin
+            path_to_coin = bfs_shortest_path(field, (opp_x, opp_y), nearest_coin, explosions)
+            if path_to_coin and len(path_to_coin) >= 2:
+                nearest_coin_direction = next_action_toward(path_to_coin[0], path_to_coin[1])
+
+    # 7. Intent - nearest crate direction
+    nearest_crate_direction = None
+    crate_coords = list(zip(*np.where(field == 1)))
+    if crate_coords:
+        opp_dist_map = bfs_distance(field, (opp_x, opp_y), explosions)
+        reachable_crates = []
+        for crate in crate_coords:
+            cx, cy = crate
+            path_to_crate = bfs_shortest_path_crate(field, (opp_x, opp_y), (cx, cy), explosions)
+            if path_to_crate:
+                reachable_crates.append((crate, len(path_to_crate) - 1, path_to_crate))
+
+        if reachable_crates:
+            # Sort by distance
+            reachable_crates.sort(key=lambda x: x[1])
+            nearest_crate_path = reachable_crates[0][2]
+            if nearest_crate_path and len(nearest_crate_path) >= 2:
+                nearest_crate_direction = next_action_toward(nearest_crate_path[0], nearest_crate_path[1])
+
+    # 8. Can opponent bomb us?
+    can_bomb_us = False
+    if opp_bombs_left > 0:
+        # Check if we would be in blast radius if opponent planted bomb now
+        blast_mask = blast_cells_from((opp_x, opp_y), field, blast_strength=3)
+        if in_bounds(field, our_x, our_y) and blast_mask[our_x, our_y]:
+            can_bomb_us = True
+
+    return {
+        "name": opp_name,
+        "position": (opp_x, opp_y),
+        "distance_to_us": float(distance_to_us),
+        "in_danger": in_danger,
+        "escape_routes": escape_routes,
+        "bombs_available": int(opp_bombs_left),
+        "score": int(opp_score),
+        "score_diff": int(score_diff),
+        "valid_moves": opp_valid_moves,
+        "last_3_actions": last_3_actions,
+        "nearest_coin_direction": nearest_coin_direction,
+        "nearest_crate_direction": nearest_crate_direction,
+        "can_bomb_us": can_bomb_us,
+    }
+
+
+def analyze_all_opponents(game_state: Dict, opponent_histories: Optional[Dict[str, List]] = None) -> List[Dict]:
+    """
+    Analyze all opponents in the game.
+
+    Args:
+        game_state: Full game state dictionary
+        opponent_histories: Dict mapping opponent names to their action history
+
+    Returns:
+        List of opponent analysis dicts
+    """
+    field = game_state.get('field', np.zeros((17, 17)))
+    self_info = game_state.get('self')
+    others = game_state.get('others', [])
+    coins = game_state.get('coins', [])
+    bombs = game_state.get('bombs', [])
+    explosions = game_state.get('explosion_map', np.zeros((17, 17)))
+
+    if self_info is None or not others:
+        return []
+
+    opponent_analyses = []
+    for opponent_info in others:
+        opp_name = opponent_info[0] if isinstance(opponent_info, (tuple, list)) else "Unknown"
+        opp_history = None
+        if opponent_histories and opp_name in opponent_histories:
+            opp_history = opponent_histories[opp_name]
+
+        analysis = analyze_opponent_state(
+            field=field.copy(),
+            opponent_info=opponent_info,
+            our_info=self_info,
+            bombs=bombs,
+            coins=coins,
+            explosions=explosions,
+            opponent_history=opp_history
+        )
+        opponent_analyses.append(analysis)
+
+    return opponent_analyses
+
