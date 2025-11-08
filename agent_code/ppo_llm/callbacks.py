@@ -166,7 +166,7 @@ def act(self, game_state) -> str:
                 action_probabilities=action_probs,
                 value_estimate=value_estimate
             )
-            print(f"[LLM] Final decision: {final_action}")
+            # print(f"[LLM] Final decision: {final_action}")
 
             # Track override vs acceptance
             if final_action == ppo_action:
@@ -346,8 +346,8 @@ def get_llm_final_decision(
     response = requests.request("POST", BOMBERMAN_AGENT_ENDPOINT, headers=headers, json=payload, timeout=180)
     results = response.json()
 
-    print(f"[LLM] Received PPO suggestion: {ppo_suggested_action} (conf: {confidence:.2%})")
-    print(f"[LLM] Reasoning: {results.get('reasoning', 'N/A')}")
+    # print(f"[LLM] Received PPO suggestion: {ppo_suggested_action} (conf: {confidence:.2%})")
+    # print(f"[LLM] Reasoning: {results.get('reasoning', 'N/A')}")
 
     llm_action = results.get('action', ppo_suggested_action)
 
