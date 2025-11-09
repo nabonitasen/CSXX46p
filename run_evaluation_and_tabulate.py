@@ -97,12 +97,21 @@ def load_metrics(agent_name, metrics_dir="evaluation_metrics"):
         name_patterns = [
             f"{location}/{agent_name}*.pkl",                                    # lowercase: ppo
             f"{location}/{agent_name.upper()}*.pkl",                           # UPPERCASE: PPO
-            f"{location}/{agent_name.replace('_', ' ').title()}*.pkl",        # Title Case: Q Learning, DQN Final
+            f"{location}/{agent_name.replace('_', ' ').title()}*.pkl",        # Title Case: Q Learning, Dqn Final
             f"{location}/{agent_name.capitalize()}*.pkl",                      # Capitalized: Ppo
             f"{location}/*{agent_name}*.pkl",                                   # Wildcard lowercase
             f"{location}/*{agent_name.upper()}*.pkl",                          # Wildcard UPPERCASE
             f"{location}/*{agent_name.replace('_', ' ').title()}*.pkl",       # Wildcard Title Case
+            f"{location}/{agent_name.replace('_', ' ').upper()}*.pkl",        # Upper with space: DQN FINAL
+            f"{location}/*{agent_name.replace('_', ' ').upper()}*.pkl",       # Wildcard Upper with space
         ]
+
+        # Special case: DQN Final (all caps first word)
+        if '_' in agent_name:
+            parts = agent_name.split('_')
+            special_case = ' '.join([parts[0].upper()] + [p.title() for p in parts[1:]])
+            name_patterns.append(f"{location}/{special_case}*.pkl")
+            name_patterns.append(f"{location}/*{special_case}*.pkl")
 
         for pattern in name_patterns:
             all_matching_files.extend(glob(pattern))
