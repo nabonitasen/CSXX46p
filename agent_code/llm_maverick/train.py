@@ -95,16 +95,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param new_game_state: The state the agent is in now.
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
-    # Record events in metrics
-    if hasattr(self, 'metrics_tracker') and self.episode_active:
-        for event in events:
-            self.metrics_tracker.record_event(event)
-        self.metrics_tracker.record_action(self_action)
-
     add_experience(self, old_game_state, self_action, new_game_state, events, 5)
     if len(self.experience_buffer) > 0:
         train_network(self)
-
+    
     self.game_score += get_score(events)
 
 
@@ -116,35 +110,12 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
-    # Record final events
-    if hasattr(self, 'metrics_tracker') and self.episode_active:
-        for event in events:
-            self.metrics_tracker.record_event(event)
-        if last_action:
-            self.metrics_tracker.record_action(last_action)
-
-        # Determine outcome
-        won = e.SURVIVED_ROUND in events
-        rank = 1 if won else 4
-        survival_steps = self.current_step if hasattr(self, 'current_step') else 0
-        total_steps = last_game_state.get('step', 400) if last_game_state else 400
-
-        self.metrics_tracker.end_episode(
-            won=won,
-            rank=rank,
-            survival_steps=survival_steps,
-            total_steps=total_steps,
-            metadata={"mode": "training", "final_events": events}
-        )
-        self.metrics_tracker.save()
-        self.episode_active = False
-
     add_experience(self, last_game_state, last_action, None, events, 5)
     if len(self.experience_buffer) > 0:
         train_network(self)
 
     update_network(self)
-
+    
     self.game_score += get_score(events)
     track_game_score(self)
 

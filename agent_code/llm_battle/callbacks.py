@@ -3,15 +3,16 @@ import numpy as np
 import pickle
 import requests
 import json
-from .helper import check_valid_movement, check_bomb_radius_and_escape, should_plant_bomb, coin_collection_policy, get_self_pos, nearest_crate_action
+from .helper import (check_valid_movement, check_bomb_radius_and_escape, should_plant_bomb,
+                     coin_collection_policy, get_self_pos, nearest_crate_action, analyze_all_opponents)
 
-BOMBERMAN_AGENT_ENDPOINT = "http://0.0.0.0:6000"
+BOMBERMAN_AGENT_ENDPOINT = "http://0.0.0.0:6000/battle-agent"
 
 def setup(self):
-    self.name = "LLM Agent"  # Set agent name for metrics
     self.movement_history = []
     self.bomb = []
     self.bomb_history = deque([], 5)
+    self.opponent_histories = {}  # Track opponent positions/actions
 
 def act(self, game_state):
     with open("game_state.pkl", 'wb') as f:
@@ -25,17 +26,21 @@ def act(self, game_state):
     bombs = game_state.get('bombs', [])
     explosions = game_state.get('explosion_map', np.zeros((17, 17)))
     lead_margin=1
-    # print(f"Round : {round}, Step : {step}")  # Removed for cleaner output
+    print(f"Round : {round}, Step : {step}")
     valid_movement = check_valid_movement(field, self_info, bombs)
     nearest_crate = nearest_crate_action(field, self_info, explosions)
     bomb_radius_data = check_bomb_radius_and_escape(field, self_info, bombs, explosions)
     plant_bomb_full_data = should_plant_bomb(game_state, field, self_info, bombs, others)
-    coins_collection_data = coin_collection_policy(field, self_info, coins, explosions, others, lead_margin) 
+    coins_collection_data = coin_collection_policy(field, self_info, coins, explosions, others, lead_margin)
     plant_bomb_data = {
-        "plant":plant_bomb_full_data.get("plant"), 
+        "plant":plant_bomb_full_data.get("plant"),
         "reason":plant_bomb_full_data.get("reason"),
         "current_status":plant_bomb_full_data.get("current_status"),
         }
+
+    # Analyze opponents
+    opponents_analysis = analyze_all_opponents(game_state, self.opponent_histories)
+
     payload = {
         "valid_movement": json.dumps(valid_movement),
         "nearest_crate": json.dumps(nearest_crate),
@@ -43,18 +48,19 @@ def act(self, game_state):
         "plant_bomb_available": json.dumps(plant_bomb_data),
         "coins_collection_policy": json.dumps(coins_collection_data),
         "movement_history": json.dumps(self.movement_history[-5:]),
+        "opponents": json.dumps(opponents_analysis),
     }
     headers = {
     'Content-Type': 'application/json'
     }
     response = requests.request("POST", BOMBERMAN_AGENT_ENDPOINT, headers=headers, json=payload)
     results = response.json()
-    # print("====================================")  # Removed for cleaner output
-    # print(results)  # Removed for cleaner output
-    # print("====================================")  # Removed for cleaner output
+    print("====================================")
+    print(results)
+    print("====================================")
     reasoning = results.get("reasoning")
     action = results.get("action")
-    # print(f"Action Taken: {action}")  # Removed for cleaner output
+    print(f"Action Taken: {action}")
     data = {
         "game_state":game_state,
         "payload":payload,
@@ -63,6 +69,18 @@ def act(self, game_state):
     with open(f"data_{round}_{step}.pkl", 'wb') as f:
         pickle.dump(data, f)
     self.movement_history.append(results)
+
+    # Update opponent histories (track last 5 positions)
+    for opponent_info in others:
+        opp_name = opponent_info[0] if isinstance(opponent_info, (tuple, list)) else "Unknown"
+        opp_pos = opponent_info[3] if isinstance(opponent_info, (tuple, list)) and len(opponent_info) >= 4 else None
+
+        if opp_name not in self.opponent_histories:
+            self.opponent_histories[opp_name] = deque(maxlen=5)
+
+        if opp_pos:
+            self.opponent_histories[opp_name].append(opp_pos)
+
     if action == "BOMB":
         current_position = get_self_pos(self_info)
         self.bomb = [current_position, 3]
@@ -70,10 +88,10 @@ def act(self, game_state):
         if self.bomb:
             countdown = self.bomb[1]
             if countdown == 0:
-                # print("BOMB exploded")  # Removed for cleaner output
+                print("BOMB exploded")
                 self.bomb = []
             else:
                 self.bomb[1] = countdown - 1
-                # print(self.bomb)  # Removed for cleaner output
+                print(self.bomb)
     return action
     

@@ -97,10 +97,11 @@ def load_metrics(agent_name, metrics_dir="evaluation_metrics"):
         name_patterns = [
             f"{location}/{agent_name}*.pkl",                                    # lowercase: ppo
             f"{location}/{agent_name.upper()}*.pkl",                           # UPPERCASE: PPO
-            f"{location}/{agent_name.replace('_', ' ').title()}*.pkl",        # Title Case: Q Learning
+            f"{location}/{agent_name.replace('_', ' ').title()}*.pkl",        # Title Case: Q Learning, DQN Final
             f"{location}/{agent_name.capitalize()}*.pkl",                      # Capitalized: Ppo
             f"{location}/*{agent_name}*.pkl",                                   # Wildcard lowercase
             f"{location}/*{agent_name.upper()}*.pkl",                          # Wildcard UPPERCASE
+            f"{location}/*{agent_name.replace('_', ' ').title()}*.pkl",       # Wildcard Title Case
         ]
 
         for pattern in name_patterns:

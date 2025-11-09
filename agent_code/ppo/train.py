@@ -22,39 +22,46 @@ MODEL_PATH = "models/ppo_agent.pth"  # consistent save/load location
 # Scaling factor: 1/500 (max absolute value was 500)
 # Relative proportions are EXACTLY preserved
 # ===================================================================
-GAME_REWARDS = {
-    "COIN_COLLECTED": 0.2,           # Good reward (was 100.0 → 100/500 = 0.2)
-    "KILLED_OPPONENT": 0.0,          # Not relevant (solo)
-    "CRATE_DESTROYED": 0.08,         # Good reward but less than coins (was 40.0 → 40/500 = 0.08)
-    "BOMB_DROPPED": 0.0,             # Neutral
-    "BOMB_EXPLODED": 0.0,
-    "KILLED_SELF": -1.0,             # Worst outcome (was -500.0 → -500/500 = -1.0)
-    "GOT_KILLED": 0.0,               # Not relevant (solo)
-    "INVALID_ACTION": -0.02,         # Small penalty for invalid actions (was -10.0 → -10/500 = -0.02)
-    "WAITED": 0.0,                   # No penalty
-    "SURVIVED_ROUND": 0.8,           # Very important (was 400.0 → 400/500 = 0.8)
-    "MOVED_UP": 0.0,
-    "MOVED_RIGHT": 0.0,
-    "MOVED_DOWN": 0.0,
-    "MOVED_LEFT": 0.0,
-}
+# ===================================================================
+# EVALUATION MODE: Using standardized evaluation rewards
+# ===================================================================
+try:
+    from evaluation_rewards import EVALUATION_REWARDS_NORMALIZED
+    GAME_REWARDS = EVALUATION_REWARDS_NORMALIZED
+    print("✅ PPO using standardized EVALUATION_REWARDS_NORMALIZED")
+except ImportError:
+    print("⚠️  evaluation_rewards.py not found, using default PPO rewards")
+    GAME_REWARDS = {
+        "COIN_COLLECTED": 0.2,
+        "KILLED_OPPONENT": 0.0,
+        "CRATE_DESTROYED": 0.08,
+        "BOMB_DROPPED": 0.0,
+        "BOMB_EXPLODED": 0.0,
+        "KILLED_SELF": -1.0,
+        "GOT_KILLED": 0.0,
+        "INVALID_ACTION": -0.02,
+        "WAITED": 0.0,
+        "SURVIVED_ROUND": 0.8,
+        "MOVED_UP": 0.0,
+        "MOVED_RIGHT": 0.0,
+        "MOVED_DOWN": 0.0,
+        "MOVED_LEFT": 0.0,
+    }
 
 # ===================================================================
-# NORMALIZED SHAPED REWARDS: Scaled to [-1, 1] with proportions preserved
+# EVALUATION MODE: Disable all shaped rewards for fair comparison
 # ===================================================================
-STEP_ALIVE_REWARD = 0.0              # REMOVED - no passive rewards
-DANGER_PENALTY = 0.0                 # REMOVED
-ESCAPED_DANGER_REWARD = 0.3          # STRONG REWARD - escaping is critical! (was 150.0 → 150/500 = 0.3)
-SAFE_BOMB_REWARD = 0.4               # VERY STRONG - successful bombing highly rewarding (was 200.0 → 200/500 = 0.4)
-BOMB_STAY_PENALTY = 0.0              # REMOVED - death penalty handles this
-UNSAFE_BOMB_PENALTY = 0.0            # REMOVED
-MOVING_TO_SAFETY_REWARD = 0.0        # REMOVED
-
-# MINIMAL SHAPED REWARDS: Encourage incremental progress toward goals
-CRATE_IN_RANGE_REWARD = 0.03         # Encourage strategic bombing (was 15.0 → 15/500 = 0.03)
-APPROACHING_COIN_REWARD = 0.05       # Make coin collection attractive (was 25.0 → 25/500 = 0.05)
-SAFE_POSITION_REWARD = 0.0           # REMOVED
-EXPLORATION_BONUS = 0.006            # Encourage exploration (was 3.0 → 3/500 = 0.006)
+STEP_ALIVE_REWARD = 0.0
+DANGER_PENALTY = 0.0
+ESCAPED_DANGER_REWARD = 0.0          # DISABLED for evaluation
+SAFE_BOMB_REWARD = 0.0               # DISABLED for evaluation
+BOMB_STAY_PENALTY = 0.0
+UNSAFE_BOMB_PENALTY = 0.0
+MOVING_TO_SAFETY_REWARD = 0.0
+CRATE_IN_RANGE_REWARD = 0.0          # DISABLED for evaluation
+APPROACHING_COIN_REWARD = 0.0        # DISABLED for evaluation
+SAFE_POSITION_REWARD = 0.0
+EXPLORATION_BONUS = 0.0              # DISABLED for evaluation
 
 # --------------------------------------------------------------------------------
 # Helper Functions for Reward Shaping
@@ -154,7 +161,7 @@ def setup_training(self):
         
         self.metrics_tracker = MetricsTracker(
             agent_name=self.name,
-            save_dir="metrics"
+            save_dir="evaluation_metrics"  # Use separate folder for evaluation
         )
         self.episode_counter = 0
     if not hasattr(self, 'post_bomb_origin'):

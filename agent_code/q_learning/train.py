@@ -53,7 +53,8 @@ def setup_training(self):
     self.gamma = 0.99  # Aligned with callbacks.py
     
     # === Metrics tracking ===
-    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="metrics")
+    # Use separate folder for evaluation metrics
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
     self.total_reward = 0
     self.round_rewards = []
 

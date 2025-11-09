@@ -759,10 +759,10 @@ def setup(self):
     # Initialize metrics tracker
     self.metrics_tracker = MetricsTracker(
         agent_name=self.name,
-        save_dir="metrics"
+        save_dir="evaluation_metrics"  # Use separate folder for evaluation
     )
     self.episode_counter = 0
-    
+
     # Track if episode is active
     self.episode_active = False
     self.current_step = 0
@@ -782,7 +782,7 @@ def act(self, game_state):
     if not hasattr(self, 'metrics_tracker'):
         self.metrics_tracker = MetricsTracker(
             agent_name=self.name,
-            save_dir="metrics"
+            save_dir="evaluation_metrics"  # Use separate folder for evaluation
         )
         self.episode_counter = 0
         self.episode_active = False

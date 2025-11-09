@@ -16,7 +16,8 @@ from .ManagerRuleBased import act_rulebased, initialize_rule_based
 import events as e
 
 # PARAMETERS = 'last_save' #select parameter_set stored in network_parameters/
-PARAMETERS = 'final_parameters' #select parameter_set stored in network_parameters/
+# PARAMETERS = 'final_parameters' #select parameter_set stored in network_parameters/
+PARAMETERS = 'save after 3000 iterations'  # Use enhanced architecture checkpoint
 
 ACTIONS = ['LEFT', 'RIGHT', 'UP', 'DOWN', 'WAIT', 'BOMB']
 
@@ -41,17 +42,10 @@ def setup(self):
         filename = os.path.join("network_parameters", f'{PARAMETERS}.pt')
         self.network.load_state_dict(torch.load(filename))
         self.network.eval()
-
+    
     initialize_rule_based(self)
 
     self.bomb_buffer = 0
-
-    # Metrics tracking for evaluation
-    from metrics.metrics_tracker import MetricsTracker
-    self.name = "Maverick"
-    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
-    self.episode_active = False
-    self.current_step = 0
     
 
 def act(self, game_state: dict) -> str:
@@ -66,34 +60,6 @@ def act(self, game_state: dict) -> str:
     
     if game_state is None:
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
-
-    # ======================================
-    # METRICS TRACKING
-    # ======================================
-    if hasattr(self, 'metrics_tracker'):
-        current_round = game_state.get('round', 0)
-        current_step = game_state.get('step', 0)
-
-        # Start new episode at step 1
-        if current_step == 1:
-            if self.episode_active and hasattr(self, 'last_game_state'):
-                _end_episode_from_act(self, self.last_game_state)
-
-            opponent_names = [o[0] for o in game_state.get('others', []) if o]
-            scenario = "training" if self.train else "evaluation"
-            self.metrics_tracker.start_episode(
-                episode_id=current_round,
-                opponent_types=opponent_names,
-                map_name="default",
-                scenario=scenario
-            )
-            self.episode_active = True
-            self.current_step = 0
-
-        if self.episode_active:
-            self.current_step += 1
-
-        self.last_game_state = game_state
 
     features = state_to_features(self, game_state)
     Q = self.network(features)
@@ -125,37 +91,3 @@ def act(self, game_state: dict) -> str:
     self.logger.info(f"Waehle Aktion {best_action} nach dem Hardmax der Q-Funktion")
 
     return best_action
-
-
-def _end_episode_from_act(self, game_state):
-    """End episode and save metrics (called from act when new round detected)."""
-    if not hasattr(self, 'metrics_tracker') or not self.episode_active:
-        return
-
-    survived = True
-    won = False
-    rank = 4
-
-    if game_state and 'self' in game_state:
-        survived = True
-        if 'others' in game_state:
-            alive_others = sum(1 for o in game_state.get('others', []) if o is not None)
-            if alive_others == 0:
-                won = True
-                rank = 1
-            else:
-                rank = 2
-
-    survival_steps = self.current_step if hasattr(self, 'current_step') else 0
-    total_steps = game_state.get('step', 400) if game_state else 400
-
-    self.metrics_tracker.end_episode(
-        won=won,
-        rank=rank,
-        survival_steps=survival_steps,
-        total_steps=total_steps,
-        metadata={"mode": "evaluation"}
-    )
-
-    self.metrics_tracker.save()
-    self.episode_active = False
