@@ -150,6 +150,13 @@ def setup(self):
         msg = "[dqn_final] No model found; running untrained."
     print(msg, flush=True)
 
+    # Metrics tracking for evaluation
+    from metrics.metrics_tracker import MetricsTracker
+    self.name = "DQN Final"
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
+    self.episode_active = False
+    self.current_step = 0
+
 def setup_training(self):
     _ensure_dirs()
     q   = ConvQNet(9, len(ACTIONS)).to(DEVICE)
@@ -170,6 +177,13 @@ def setup_training(self):
     else:
         msg = "[dqn_final] Starting fresh training."
     print(msg, flush=True)
+
+    # Metrics tracking for evaluation
+    from metrics.metrics_tracker import MetricsTracker
+    self.name = "DQN Final"
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
+    self.episode_active = False
+    self.current_step = 0
 
 # =========================
 # --- Helpers ---
@@ -569,22 +583,108 @@ def act(self, game_state: dict) -> str:
         self.state.last_s = state_to_features(self, game_state)
         self.state.last_a = a_idx
 
+    # ======================================
+    # METRICS TRACKING
+    # ======================================
+    if hasattr(self, 'metrics_tracker'):
+        current_round = game_state.get('round', 0)
+        current_step = game_state.get('step', 0)
+
+        # Start new episode at step 1
+        if current_step == 1:
+            if self.episode_active and hasattr(self, 'last_game_state'):
+                _end_episode_from_act(self, self.last_game_state)
+
+            opponent_names = [o[0] for o in game_state.get('others', []) if o]
+            scenario = "training" if self.train else "evaluation"
+            self.metrics_tracker.start_episode(
+                episode_id=current_round,
+                opponent_types=opponent_names,
+                map_name="default",
+                scenario=scenario
+            )
+            self.episode_active = True
+            self.current_step = 0
+
+        if self.episode_active:
+            self.current_step += 1
+
+        self.last_game_state = game_state
+
     return ACTIONS[a_idx]
+
+
+def _end_episode_from_act(self, game_state):
+    """End episode and save metrics (called from act when new round detected)."""
+    if not hasattr(self, 'metrics_tracker') or not self.episode_active:
+        return
+
+    survived = True
+    won = False
+    rank = 4
+
+    if game_state and 'self' in game_state:
+        survived = True
+        if 'others' in game_state:
+            alive_others = sum(1 for o in game_state.get('others', []) if o is not None)
+            if alive_others == 0:
+                won = True
+                rank = 1
+            else:
+                rank = 2
+
+    survival_steps = self.current_step if hasattr(self, 'current_step') else 0
+    total_steps = game_state.get('step', 400) if game_state else 400
+
+    self.metrics_tracker.end_episode(
+        won=won,
+        rank=rank,
+        survival_steps=survival_steps,
+        total_steps=total_steps,
+        metadata={"mode": "evaluation"}
+    )
+
+    self.metrics_tracker.save()
+    self.episode_active = False
 
 # =========================
 # Rewards
 # =========================
 def reward_from_events(self, events) -> float:
-    T = {
-        "COIN_COLLECTED": 12.0, "CRATE_DESTROYED": 0.5, "KILLED_OPPONENT": 12.0,
-        "SURVIVED_ROUND": 0.5, "INVALID_ACTION": -1.0, "KILLED_SELF": -15.0,
-        "GOT_KILLED": -5.0, "WAITED": -0.4, "BOMB_DROPPED": 0.0, "BOMB_EXPLODED": 0.0,
-    }
-    r = 0.0
-    for ev in events: r += T.get(ev, 0.0)
-    return r
+    """
+    Use standardized evaluation rewards for fair comparison.
+    Falls back to original DQN rewards if evaluation_rewards not available.
+    """
+    try:
+        from evaluation_rewards import EVALUATION_REWARDS
+        use_evaluation = True
+    except ImportError:
+        use_evaluation = False
+
+    if use_evaluation:
+        reward_sum = 0.0
+        for ev in events:
+            reward_sum += EVALUATION_REWARDS.get(ev, 0.0)
+        return reward_sum
+    else:
+        # Original DQN rewards
+        T = {
+            "COIN_COLLECTED": 12.0, "CRATE_DESTROYED": 0.5, "KILLED_OPPONENT": 12.0,
+            "SURVIVED_ROUND": 0.5, "INVALID_ACTION": -1.0, "KILLED_SELF": -15.0,
+            "GOT_KILLED": -5.0, "WAITED": -0.4, "BOMB_DROPPED": 0.0, "BOMB_EXPLODED": 0.0,
+        }
+        r = 0.0
+        for ev in events:
+            r += T.get(ev, 0.0)
+        return r
 
 def game_events_occurred(self, old_game_state, self_action, new_game_state, events):
+    # Record events in metrics
+    if hasattr(self, 'metrics_tracker') and self.episode_active:
+        for event in events:
+            self.metrics_tracker.record_event(event)
+        self.metrics_tracker.record_action(self_action)
+
     if not hasattr(self, "state"): return
 
     s  = state_to_features(self, old_game_state)
@@ -646,6 +746,30 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
         self.state.tgt.load_state_dict(self.state.q.state_dict())
 
 def end_of_round(self, last_game_state, last_action, events):
+    # Record final events
+    if hasattr(self, 'metrics_tracker') and self.episode_active:
+        for event in events:
+            self.metrics_tracker.record_event(event)
+        if last_action:
+            self.metrics_tracker.record_action(last_action)
+
+        # Determine outcome
+        import events as e
+        won = e.SURVIVED_ROUND in events
+        rank = 1 if won else 4
+        survival_steps = self.current_step if hasattr(self, 'current_step') else 0
+        total_steps = last_game_state.get('step', 400) if last_game_state else 400
+
+        self.metrics_tracker.end_episode(
+            won=won,
+            rank=rank,
+            survival_steps=survival_steps,
+            total_steps=total_steps,
+            metadata={"mode": "evaluation", "final_events": events}
+        )
+        self.metrics_tracker.save()
+        self.episode_active = False
+
     if not hasattr(self, "state"): return
     s = state_to_features(self, last_game_state)
     if s is not None and last_action is not None:
