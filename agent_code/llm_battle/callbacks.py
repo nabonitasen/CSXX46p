@@ -14,11 +14,41 @@ def setup(self):
     self.bomb_history = deque([], 5)
     self.opponent_histories = {}  # Track opponent positions/actions
 
+    # Metrics tracking for evaluation
+    from metrics.metrics_tracker import MetricsTracker
+    self.name = "LLM Battle"
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
+    self.episode_active = False
+    self.current_step = 0
+
 def act(self, game_state):
     with open("game_state.pkl", 'wb') as f:
         pickle.dump(game_state, f)
     round = game_state.get('round')
     step = game_state.get('step')
+
+    # METRICS TRACKING
+    if hasattr(self, 'metrics_tracker'):
+        # Start new episode at step 1
+        if step == 1:
+            if self.episode_active and hasattr(self, 'last_game_state'):
+                _end_episode_from_act(self, self.last_game_state)
+
+            opponent_names = [o[0] for o in game_state.get('others', []) if o]
+            self.metrics_tracker.start_episode(
+                episode_id=round,
+                opponent_types=opponent_names,
+                map_name="default",
+                scenario="evaluation"
+            )
+            self.episode_active = True
+            self.current_step = 0
+
+        if self.episode_active:
+            self.current_step += 1
+
+        self.last_game_state = game_state
+
     field = game_state.get('field', np.zeros((17, 17)))
     self_info = game_state.get('self')
     others = game_state.get('others', [])
@@ -94,4 +124,55 @@ def act(self, game_state):
                 self.bomb[1] = countdown - 1
                 print(self.bomb)
     return action
-    
+
+
+def _end_episode_from_act(self, game_state, events=None):
+    """End episode and save metrics (called from act when new round detected or end_of_round)."""
+    if not hasattr(self, 'metrics_tracker') or not self.episode_active:
+        return
+
+    # Record final events if provided with evaluation rewards
+    if events and hasattr(self, 'metrics_tracker'):
+        from evaluation_rewards import EVALUATION_REWARDS
+        for event in events:
+            event_name = event if isinstance(event, str) else str(event)
+            reward = EVALUATION_REWARDS.get(event_name, 0.0)
+            self.metrics_tracker.record_event(event_name, reward=reward)
+
+    import events as e
+    survived = True
+    won = False
+    rank = 4
+
+    if game_state and 'self' in game_state:
+        survived = True
+        if 'others' in game_state:
+            alive_others = sum(1 for o in game_state.get('others', []) if o is not None)
+            if alive_others == 0:
+                won = True
+                rank = 1
+            else:
+                rank = 2
+
+    survival_steps = self.current_step if hasattr(self, 'current_step') else 0
+    total_steps = game_state.get('step', 400) if game_state else 400
+
+    self.metrics_tracker.end_episode(
+        won=won,
+        rank=rank,
+        survival_steps=survival_steps,
+        total_steps=total_steps,
+        metadata={"mode": "llm_battle"}
+    )
+
+    self.metrics_tracker.save()
+    self.episode_active = False
+
+
+def end_of_round(self, last_game_state: dict, last_action: str, events: list):
+    """Called at the end of each round during play mode."""
+    if hasattr(self, 'episode_active') and self.episode_active:
+        # Record final action if provided
+        if last_action and hasattr(self, 'metrics_tracker'):
+            self.metrics_tracker.record_action(last_action)
+        _end_episode_from_act(self, last_game_state, events)

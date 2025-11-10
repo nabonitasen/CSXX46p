@@ -113,6 +113,48 @@ def load_metrics(agent_name, metrics_dir="evaluation_metrics"):
             name_patterns.append(f"{location}/{special_case}*.pkl")
             name_patterns.append(f"{location}/*{special_case}*.pkl")
 
+        # Special case: q_llm saves as "Hybrid Q-LLM Training"
+        if agent_name == 'q_llm':
+            name_patterns.append(f"{location}/Hybrid Q-LLM Training*.pkl")
+            name_patterns.append(f"{location}/*Hybrid Q-LLM Training*.pkl")
+
+        # Special case: ppo_llm saves as "PPO→LLM Sequential Agent" (with arrow character)
+        if agent_name == 'ppo_llm':
+            name_patterns.append(f"{location}/PPO LLM*.pkl")
+            name_patterns.append(f"{location}/*PPO LLM*.pkl")
+            name_patterns.append(f"{location}/PPO→LLM*.pkl")  # Arrow character
+            name_patterns.append(f"{location}/*PPO→LLM*.pkl")  # Arrow character wildcard
+
+        # Special case: llm saves as "LLM Agent"
+        if agent_name == 'llm':
+            name_patterns.append(f"{location}/LLM Agent*.pkl")
+            name_patterns.append(f"{location}/*LLM Agent*.pkl")
+
+        # Special case: llm_battle saves as "LLM Battle"
+        if agent_name == 'llm_battle':
+            name_patterns.append(f"{location}/LLM Battle*.pkl")
+            name_patterns.append(f"{location}/*LLM Battle*.pkl")
+
+        # Special case: llm_predict saves as "LLM Predict"
+        if agent_name == 'llm_predict':
+            name_patterns.append(f"{location}/LLM Predict*.pkl")
+            name_patterns.append(f"{location}/*LLM Predict*.pkl")
+
+        # Special case: llm_maverick saves as "LLM Maverick"
+        if agent_name == 'llm_maverick':
+            name_patterns.append(f"{location}/LLM Maverick*.pkl")
+            name_patterns.append(f"{location}/*LLM Maverick*.pkl")
+
+        # Special case: llm_maverick_v3 saves as "LLM Maverick" (same as llm_maverick)
+        if agent_name == 'llm_maverick_v3':
+            name_patterns.append(f"{location}/LLM Maverick*.pkl")
+            name_patterns.append(f"{location}/*LLM Maverick*.pkl")
+
+        # Special case: maverick_enhanced saves as "Maverick Enhanced"
+        if agent_name == 'maverick_enhanced':
+            name_patterns.append(f"{location}/Maverick Enhanced*.pkl")
+            name_patterns.append(f"{location}/*Maverick Enhanced*.pkl")
+
         for pattern in name_patterns:
             all_matching_files.extend(glob(pattern))
 
@@ -200,7 +242,17 @@ def generate_comparison_table(agents, metrics_dir="metrics"):
                 'avg_coins': summary.get('avg_coins_per_episode', summary.get('avg_coins_collected', 0)),
                 'kills': summary.get('total_kills', summary.get('sum_opponents_killed', 0)),
                 'deaths': summary.get('total_deaths', summary.get('sum_deaths', 0)),
-                'survival_rate': summary.get('survival_rate', (1 - summary.get('avg_deaths', 0))) * 100,
+                'deaths_by_opponent': summary.get('total_deaths_by_opponent', 0),
+                'deaths_by_bomb': summary.get('total_deaths_by_bomb', 0),
+                'avg_deaths': summary.get('avg_deaths', 0),
+                'survival_rate': summary.get('survival_rate', 0) * 100,  # Already 0-1, multiply by 100 for percentage
+                'avg_survival_time': summary.get('avg_survival_time', 0),
+                'total_bombs': summary.get('total_bombs_placed', 0),
+                'avg_bombs': summary.get('avg_bombs_per_episode', 0),
+                'bomb_effectiveness': summary.get('bomb_effectiveness', 0) * 100,
+                'total_crates': summary.get('total_crates', 0),
+                'avg_crates': summary.get('avg_crates_per_episode', 0),
+                'invalid_action_rate': summary.get('invalid_action_rate', 0) * 100,
             }
         except Exception as e:
             print(f"Error processing metrics for {agent_name}: {e}")
@@ -237,14 +289,24 @@ def generate_comparison_table(agents, metrics_dir="metrics"):
 
     for rank, (agent_name, stats) in enumerate(sorted_agents, 1):
         print(f"\n#{rank} {agent_name}:")
-        print(f"  Episodes:        {stats['episodes']}")
-        print(f"  Total Reward:    {stats['total_reward']:.2f}")
-        print(f"  Avg Reward:      {stats['avg_reward']:.2f}")
-        print(f"  Win Rate:        {stats['win_rate']:.1f}%")
-        print(f"  Coins Collected: {stats['coins']} (avg: {stats['avg_coins']:.2f}/episode)")
-        print(f"  Opponents Killed: {stats['kills']}")
-        print(f"  Deaths:          {stats['deaths']}")
-        print(f"  Survival Rate:   {stats['survival_rate']:.1f}%")
+        print(f"  Episodes:           {stats['episodes']}")
+        print(f"  Total Reward:       {stats['total_reward']:.2f}")
+        print(f"  Avg Reward:         {stats['avg_reward']:.2f}")
+        print(f"  Win Rate:           {stats['win_rate']:.1f}%")
+        print(f"  Avg Survival Time:  {stats['avg_survival_time']:.1f} steps")
+        print()
+        print(f"  Coins Collected:    {stats['coins']} (avg: {stats['avg_coins']:.2f}/episode)")
+        print(f"  Crates Destroyed:   {stats['total_crates']} (avg: {stats['avg_crates']:.2f}/episode)")
+        print()
+        print(f"  Opponents Killed:   {stats['kills']}")
+        print(f"  Deaths (Total):     {stats['deaths']} (avg: {stats['avg_deaths']:.2f}/episode)")
+        print(f"    - By Opponent:    {stats['deaths_by_opponent']}")
+        print(f"    - Self Kills:     {stats['deaths_by_bomb']}")
+        print(f"  Survival Rate:      {stats['survival_rate']:.1f}%")
+        print()
+        print(f"  Bombs Placed:       {stats['total_bombs']} (avg: {stats['avg_bombs']:.2f}/episode)")
+        print(f"  Bomb Effectiveness: {stats['bomb_effectiveness']:.1f}%")
+        print(f"  Invalid Actions:    {stats['invalid_action_rate']:.1f}%")
 
     print("\n" + "=" * 80)
 

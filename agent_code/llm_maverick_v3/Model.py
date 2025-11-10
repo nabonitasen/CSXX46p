@@ -16,17 +16,16 @@ class Maverick(nn.Module):
     def __init__(self):
         super(Maverick, self).__init__()
 
-        self.input_size = 26  # Upgraded from 23 to include 3 new safety features
+        self.input_size = 23
         self.number_of_actions = 6
 
-        #LAYERS - Original maverick architecture with updated input size
-        # 26 -> 60 -> 6 (similar to original 23 -> 60 -> 6)
+        #LAYERS
         self.dense = nn.Linear(in_features=self.input_size, out_features=60)
         self.out = nn.Linear(in_features=60, out_features=self.number_of_actions)
 
 
     def forward(self, x):
-        x = F.relu(self.dense(x))
+        x = F.relu((self.dense(x)))
         out = self.out(x)
         return out
 

@@ -1,7 +1,7 @@
 """
-Training callbacks for LLM agent - for evaluation metrics tracking only.
+Training callbacks for LLM Battle agent - for evaluation metrics tracking only.
 
-The LLM agent doesn't learn from rewards (it uses Claude API for decisions),
+The LLM Battle agent doesn't learn from rewards (it uses Claude API for decisions),
 but we track metrics for evaluation and comparison with other agents.
 """
 
@@ -12,11 +12,11 @@ from metrics.metrics_tracker import MetricsTracker
 
 def setup_training(self):
     """
-    Setup for LLM agent evaluation tracking.
+    Setup for LLM Battle agent evaluation tracking.
 
     LLM doesn't train/learn, but we track metrics for evaluation.
     """
-    self.name = "LLM Agent"
+    self.name = "LLM Battle"
 
     # Setup logger
     if not hasattr(self, 'logger'):
@@ -33,7 +33,7 @@ def setup_training(self):
         save_dir="evaluation_metrics"
     )
 
-    self.logger.info("LLM evaluation tracking initialized.")
+    self.logger.info("LLM Battle evaluation tracking initialized.")
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str,

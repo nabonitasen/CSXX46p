@@ -32,11 +32,11 @@ def reward_from_events(self, events):
 
 def load_for_eval():
     from .callbacks import ConvQNet, DEVICE
-    in_ch, n_actions = 7, 6
+    in_ch, n_actions = 9, 6  # Updated to 9 channels
     q = ConvQNet(in_ch, n_actions).to(DEVICE)
     path = _latest_model_path()
     if path is None:
-        raise FileNotFoundError("No saved dqn_final model under models/")
+        raise FileNotFoundError("No saved dqn_nabo model under models/")
     state = torch.load(path, map_location=DEVICE)
     q.load_state_dict(state["q"])
     q.eval()

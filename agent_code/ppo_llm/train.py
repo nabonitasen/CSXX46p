@@ -86,7 +86,7 @@ def setup_training(self):
     if not hasattr(self, 'metrics_tracker'):
         self.metrics_tracker = MetricsTracker(
             agent_name=self.name,
-            save_dir="metrics"
+            save_dir="evaluation_metrics"
         )
         self.episode_counter = 0
 
@@ -237,16 +237,19 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         self.logger.warning("ppo_agent not available at end_of_round - skipping update.")
         return
 
+    # Record ALL final events to metrics tracker
+    # NOTE: end_of_round receives events that occur at round end (death, survival, etc.)
+    # These must be recorded for accurate metrics tracking
+    if hasattr(self, 'metrics_tracker') and self.metrics_tracker.current_episode:
+        for event in events:
+            event_reward = GAME_REWARDS.get(event, 0)
+            self.metrics_tracker.record_event(event, reward=event_reward)
+
     # Final reward computation
     final_reward = 0.0
     for event in events:
         event_reward = GAME_REWARDS.get(event, 0)
         final_reward += event_reward
-
-        # Record final events
-        if event in ['KILLED_SELF', 'GOT_KILLED', 'SURVIVED_ROUND', 'OPPONENT_ELIMINATED']:
-            if hasattr(self, 'metrics_tracker') and self.metrics_tracker.current_episode:
-                self.metrics_tracker.record_event(event, reward=event_reward)
 
     # Store final transition if we have last_obs
     if hasattr(self, "last_obs") and self.last_obs is not None:

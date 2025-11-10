@@ -127,6 +127,14 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: list):
     # Add custom events
     events = add_custom_events(last_game_state, None, events)
 
+    # === Record final events to metrics tracker ===
+    if hasattr(self, "metrics_tracker") and self.metrics_tracker.current_episode:
+        self.logger.info(f"Recording {len(events)} FINAL events to metrics: {events}")
+        for event in events:
+            event_name = event if isinstance(event, str) else getattr(event, 'name', str(event))
+            self.metrics_tracker.record_event(event_name)
+            self.logger.debug(f"Recorded final event: {event_name}")
+
     # === Final reward ===
     reward = reward_from_events(self, events)
     self.total_reward += reward

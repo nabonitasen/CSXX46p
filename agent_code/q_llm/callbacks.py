@@ -99,7 +99,7 @@ def setup(self):
     self.llm_decisions = []  # Track LLM final decisions
 
     # Metrics tracking
-    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="metrics")
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
     self.episode_counter = 0
     self.episode_active = False
     self.current_step = 0
@@ -270,11 +270,11 @@ def get_llm_final_decision(self, game_state, q_suggested_action: str, q_values: 
         "movement_history": json.dumps(self.movement_history[-5:]),
 
         # Q-learning suggestion (NEW!)
-        # "rl_model_suggestion": json.dumps({
-        #     "recommended_action": q_suggested_action,
-        #     "q_values": {k: float(v) for k, v in q_values.items()},
-        #     "confidence": float(max(q_values.values()) - min(q_values.values())) if q_values else 0.0
-        # })
+        "rl_model_suggestion": json.dumps({
+            "recommended_action": q_suggested_action,
+            "q_values": {k: float(v) for k, v in q_values.items()},
+            "confidence": float(max(q_values.values()) - min(q_values.values())) if q_values else 0.0
+        })
     }
 
     headers = {'Content-Type': 'application/json'}

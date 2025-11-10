@@ -51,7 +51,7 @@ from .helper import (
 )
 
 BOMBERMAN_AGENT_ENDPOINT = "http://0.0.0.0:6000"
-MODEL_PATH = "models/ppo_llm_agent.pth"
+MODEL_PATH = "models/ppo_agent.pth"
 
 
 # ===================================================================
@@ -112,7 +112,7 @@ def setup(self):
     self.llm_decisions = []    # Track LLM final decisions
 
     # Metrics tracking
-    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="metrics")
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
     self.episode_counter = 0
     self.episode_active = False
     self.current_step = 0
@@ -382,7 +382,7 @@ def get_valid_actions_from_mask(action_mask: np.ndarray) -> list:
 def track_episode_metrics(self, game_state, action):
     """Track metrics for both training and play modes."""
     if not hasattr(self, 'metrics_tracker'):
-        self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="metrics")
+        self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
 
     current_round = game_state.get('round', 0) if game_state else 0
     current_step = game_state.get('step', 0) if game_state else 0

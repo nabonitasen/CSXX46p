@@ -66,7 +66,7 @@ Transition = namedtuple("Transition", ("s","a","r","sp","done"))
 # Logging Setup
 log_dir = "logs"
 os.makedirs(log_dir, exist_ok=True)
-log_path = os.path.join(log_dir, f"dqn_torch_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+log_path = os.path.join(log_dir, f"dqn_nabo_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
 logging.basicConfig(
     filename=log_path,
@@ -74,8 +74,8 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("dqn_torch")
-print(f"[dqn_torch] Logging to {log_path}")
+logger = logging.getLogger("dqn_nabo")
+print(f"[dqn_nabo] Logging to {log_path}")
 
 
 class RollingMeter:
@@ -173,8 +173,7 @@ def _ensure_dirs():
 def _latest_model_path():
     mdir = Path(__file__).parent / "models"
     if not mdir.exists(): return None
-    patterns = ["dqn_final_ep*.pth", "dqn_final_ep*.pt", "dqn_final_*.pth", "dqn_final_*.pt",
-                "dqn_works_ep*.pth", "dqn_works_ep*.pt", "dqn_works_*.pth", "dqn_works_*.pt"]
+    patterns = ["dqn_nabo_ep*.pth", "dqn_nabo_ep*.pt", "dqn_nabo_*.pth", "dqn_nabo_*.pt"]
     cands = []
     for pat in patterns: cands.extend(mdir.glob(pat))
     if not cands: return None
@@ -184,7 +183,7 @@ def setup(self):
     _ensure_dirs()
     model_path = _latest_model_path()
     q = ConvQNet(in_ch=9, n_actions=len(ACTIONS)).to(DEVICE)
-        
+
     # Inference net should NOT update BN stats
     q.eval()
     self.q_infer = q
@@ -196,11 +195,18 @@ def setup(self):
     if model_path:
         state = torch.load(model_path, map_location=DEVICE)
         q.load_state_dict(state["q"])
-        msg = f"[dqn_final] Loaded model for inference: {model_path.resolve()}"
+        msg = f"[dqn_nabo] Loaded model for inference: {model_path.resolve()}"
     else:
-        msg = "[dqn_final] No model found; running untrained."
+        msg = "[dqn_nabo] No model found; running untrained."
     print(msg, flush=True)
-    logger.info(msg)    
+    logger.info(msg)
+
+    # Metrics tracking for evaluation
+    from metrics.metrics_tracker import MetricsTracker
+    self.name = "DQN Nabo"
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
+    self.episode_active = False
+    self.current_step = 0    
 
 def setup_training(self):
     _ensure_dirs()
@@ -236,16 +242,23 @@ def setup_training(self):
             opt.load_state_dict(chk["opt"])
             self.state.step = chk.get("step", 0)
             self.state.episode = chk.get("episode", 0)
-            msg = f"[dqn_final] Resumed from {model_path.name}"
+            msg = f"[dqn_nabo] Resumed from {model_path.name}"
         except Exception as e:
-            msg = f"[dqn_final] Could not resume: {e}"
+            msg = f"[dqn_nabo] Could not resume: {e}"
     else:
-        msg = "[dqn_final] Starting fresh training."
+        msg = "[dqn_nabo] Starting fresh training."
     print(msg, flush=True)
 
-    # Re-assert modes after any load (load_state_dict doesn’t change mode)
+    # Re-assert modes after any load (load_state_dict doesn't change mode)
     self.state.q.train()
     self.state.tgt.eval()
+
+    # Metrics tracking for evaluation
+    from metrics.metrics_tracker import MetricsTracker
+    self.name = "DQN Nabo"
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
+    self.episode_active = False
+    self.current_step = 0
 
 
 # =========================
@@ -703,73 +716,150 @@ def act(self, game_state: dict) -> str:
         self.state.last_s = state_to_features(self, game_state)
         self.state.last_a = a_idx
 
+    # ======================================
+    # METRICS TRACKING
+    # ======================================
+    if hasattr(self, 'metrics_tracker'):
+        current_round = game_state.get('round', 0)
+        current_step = game_state.get('step', 0)
+
+        # Start new episode at step 1
+        if current_step == 1:
+            if self.episode_active and hasattr(self, 'last_game_state'):
+                _end_episode_from_act(self, self.last_game_state)
+
+            opponent_names = [o[0] for o in game_state.get('others', []) if o]
+            scenario = "training" if self.train else "evaluation"
+            self.metrics_tracker.start_episode(
+                episode_id=current_round,
+                opponent_types=opponent_names,
+                map_name="default",
+                scenario=scenario
+            )
+            self.episode_active = True
+            self.current_step = 0
+
+        if self.episode_active:
+            self.current_step += 1
+
+        self.last_game_state = game_state
+
     return ACTIONS[a_idx]
+
+
+def _end_episode_from_act(self, game_state):
+    """End episode and save metrics (called from act when new round detected)."""
+    if not hasattr(self, 'metrics_tracker') or not self.episode_active:
+        return
+
+    survived = True
+    won = False
+    rank = 4
+
+    if game_state and 'self' in game_state:
+        survived = True
+        if 'others' in game_state:
+            alive_others = sum(1 for o in game_state.get('others', []) if o is not None)
+            if alive_others == 0:
+                won = True
+                rank = 1
+            else:
+                rank = 2
+
+    survival_steps = self.current_step if hasattr(self, 'current_step') else 0
+    total_steps = game_state.get('step', 400) if game_state else 400
+
+    self.metrics_tracker.end_episode(
+        won=won,
+        rank=rank,
+        survival_steps=survival_steps,
+        total_steps=total_steps,
+        metadata={"mode": "evaluation"}
+    )
+
+    self.metrics_tracker.save()
+    self.episode_active = False
 
 # =========================
 # Rewards
 # =========================
 def reward_from_events(self, events) -> float:
-    # T = {
-    #     "COIN_COLLECTED": 12.0, "CRATE_DESTROYED": 0.5, "KILLED_OPPONENT": 12.0,
-    #     "SURVIVED_ROUND": 0.5, "INVALID_ACTION": -1.0, "KILLED_SELF": -15.0,
-    #     "GOT_KILLED": -5.0, "WAITED": -0.4, "BOMB_DROPPED": 0.0, "BOMB_EXPLODED": 0.0,
-    # }
-    # r = 0.0
-    # for ev in events: r += T.get(ev, 0.0)
-    # return r
-    
-    # step counter per round
-    if not hasattr(self, "_round_steps"):
-        self._round_steps = 0
-    self._round_steps += 1
+    """
+    Use standardized evaluation rewards for fair comparison.
+    Falls back to custom rewards if evaluation_rewards not available.
+    """
+    try:
+        from evaluation_rewards import EVALUATION_REWARDS, get_reward_from_events
+        use_evaluation = True
+    except ImportError:
+        use_evaluation = False
 
-    reward = 0.0
+    if use_evaluation:
+        # Use standardized evaluation rewards
+        reward = get_reward_from_events(events)
 
-    if "COIN_COLLECTED" in events:
-        reward += 10.0
-    if "KILLED_OPPONENT" in events:
-        reward += 20.0
+        # Add small step alive bonus for dense signal (helps with learning)
+        reward += 0.1
 
-    # Penalties
-    if "INVALID_ACTION" in events:
-        reward -= 1.5 # 1.0
-    if "WAITED" in events:
-        try:
-            gs = getattr(self, "_last_gs_for_reward", None)
-            if gs is not None:
-                x, y = gs["self"][3]
-                ttb = time_to_blast_grid(gs)
-                if ttb[y, x] > SAFE_TTB_LIMIT:
-                    reward -= 0.2
-        except Exception:
-            pass
+        return reward
+    else:
+        # Fallback to custom DQN Nabo rewards
+        # step counter per round
+        if not hasattr(self, "_round_steps"):
+            self._round_steps = 0
+        self._round_steps += 1
 
-        
-    death_penalty = -20.0
-    if getattr(self, "state", None) and getattr(self.state, "episode", 0) < 3000:
-        death_penalty = -6.0   # less punishing early curriculum
+        reward = 0.0
 
-    if "GOT_KILLED" in events or "KILLED_SELF" in events:
-        reward += death_penalty
-        
-    # --- Survival bonuses ---
-    if "SURVIVED_ROUND" in events:
-        reward += 5.0  # stronger survival reward
-    if getattr(self, "_round_steps", 0) > 50:
-        reward += 2.0  # survived long enough
-    if getattr(self, "_round_steps", 0) > 100:
-        reward += 3.0  # even longer
+        if "COIN_COLLECTED" in events:
+            reward += 10.0
+        if "KILLED_OPPONENT" in events:
+            reward += 20.0
 
+        # Penalties
+        if "INVALID_ACTION" in events:
+            reward -= 1.5
+        if "WAITED" in events:
+            try:
+                gs = getattr(self, "_last_gs_for_reward", None)
+                if gs is not None:
+                    x, y = gs["self"][3]
+                    ttb = time_to_blast_grid(gs)
+                    if ttb[y, x] > SAFE_TTB_LIMIT:
+                        reward -= 0.2
+            except Exception:
+                pass
 
-    # Dense signal: reward for surviving
-    reward += 0.1
+        death_penalty = -20.0
+        if getattr(self, "state", None) and getattr(self.state, "episode", 0) < 3000:
+            death_penalty = -6.0   # less punishing early curriculum
 
-    return reward
+        if "GOT_KILLED" in events or "KILLED_SELF" in events:
+            reward += death_penalty
+
+        # --- Survival bonuses ---
+        if "SURVIVED_ROUND" in events:
+            reward += 5.0
+        if getattr(self, "_round_steps", 0) > 50:
+            reward += 2.0
+        if getattr(self, "_round_steps", 0) > 100:
+            reward += 3.0
+
+        # Dense signal: reward for surviving
+        reward += 0.1
+
+        return reward
     
 
 
 
 def game_events_occurred(self, old_game_state, self_action, new_game_state, events):
+    # Record events in metrics
+    if hasattr(self, 'metrics_tracker') and self.episode_active:
+        for event in events:
+            self.metrics_tracker.record_event(event)
+        self.metrics_tracker.record_action(self_action)
+
     if not hasattr(self, "state"): return
 
     s  = state_to_features(self, old_game_state)
@@ -852,9 +942,33 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
         self.state.tgt.load_state_dict(self.state.q.state_dict())
 
 def end_of_round(self, last_game_state, last_action, events):
+    # Record final events
+    if hasattr(self, 'metrics_tracker') and self.episode_active:
+        for event in events:
+            self.metrics_tracker.record_event(event)
+        if last_action:
+            self.metrics_tracker.record_action(last_action)
+
+        # Determine outcome
+        import events as e
+        won = e.SURVIVED_ROUND in events
+        rank = 1 if won else 4
+        survival_steps = self.current_step if hasattr(self, 'current_step') else 0
+        total_steps = last_game_state.get('step', 400) if last_game_state else 400
+
+        self.metrics_tracker.end_episode(
+            won=won,
+            rank=rank,
+            survival_steps=survival_steps,
+            total_steps=total_steps,
+            metadata={"mode": "evaluation", "final_events": events}
+        )
+        self.metrics_tracker.save()
+        self.episode_active = False
+
     if not hasattr(self, "state"): return
     s = state_to_features(self, last_game_state)
-    
+
     if s is not None and last_action is not None:
         self.state.rb.push(s, ACTIONS.index(last_action), reward_from_events(self, events), s, True)
 
@@ -867,7 +981,7 @@ def end_of_round(self, last_game_state, last_action, events):
     self.state.last_move = None
     self.state.pos_hist.clear()
 
-    print(f"[dqn_final] Round {self.state.episode} ended — steps={self.state.step}", flush=True)
+    print(f"[dqn_nabo] Round {self.state.episode} ended — steps={self.state.step}", flush=True)
     
     # --- Update KPI metrics ---
     steps = last_game_state.get("step", 0) if last_game_state else 0
@@ -956,7 +1070,7 @@ def _learn(self):
 def _save_round_ckpt(self):
     mdir = Path(__file__).parent / "models"
     mdir.mkdir(parents=True, exist_ok=True)
-    fname = f"dqn_final_ep{self.state.episode:06d}.pth"
+    fname = f"dqn_nabo_ep{self.state.episode:06d}.pth"
     path = mdir / fname
     torch.save({
         "q": self.state.q.state_dict(),
@@ -968,7 +1082,7 @@ def _save_round_ckpt(self):
     }, path)
 
 
-    print(f"[dqn_final] saved {path.name}", flush=True)
+    print(f"[dqn_nabo] saved {path.name}", flush=True)
 
 # =========================
 # Features

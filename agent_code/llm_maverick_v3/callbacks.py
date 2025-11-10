@@ -29,6 +29,9 @@ from agent_code.llm_predict.helper import (
     analyze_all_opponents
 )
 
+# Import smart LLM triggering system
+from .ManagerLLMTrigger import should_trigger_llm, log_llm_trigger_stats, reset_trigger_stats
+
 import events as e
 
 # PARAMETERS = 'last_save' #select parameter_set stored in network_parameters/
@@ -73,10 +76,19 @@ def setup(self):
     self.opponent_histories = {}  # Track opponent positions/actions
     self.llm_available = True  # Track if LLM server is responding
 
+    # Smart LLM triggering - behavioral loop detection
+    self.action_history = deque(maxlen=5)  # Last 5 actions
+    self.position_history = deque(maxlen=5)  # Last 5 positions
+    self.llm_call_count = 0
+    self.total_steps = 0
+
     # Metrics tracking for evaluation
     from metrics.metrics_tracker import MetricsTracker
     self.name = "LLM Maverick"
-    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
+    # Save metrics to agent's directory (not project root)
+    agent_dir = os.path.dirname(os.path.abspath(__file__))
+    metrics_dir = os.path.join(agent_dir, "evaluation_metrics")
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir=metrics_dir)
     self.episode_active = False
     self.current_step = 0
 
@@ -181,54 +193,81 @@ def act(self, game_state: dict) -> str:
     # Analyze opponents
     opponents_analysis = analyze_all_opponents(game_state, self.opponent_histories)
 
-    # STEP 4: If LLM is available, send combined payload for final decision
-    final_action = maverick_best_action  # Fallback to Maverick
+    # STEP 4: Check if LLM should be triggered (SMART TRIGGERING)
+    final_action = maverick_best_action  # Default fallback to Maverick
 
     if self.llm_available and not self.train:  # Only use LLM during inference
-        try:
-            payload = {
-                # NEW: Maverick's recommendations
-                "maverick_top_actions": json.dumps(top_3_actions),
-                "maverick_features": json.dumps(features.squeeze().tolist()),
-                "maverick_best_action": maverick_best_action,
+        # Check if we should call LLM based on behavioral loops, uncertainty, and bomb decisions
+        should_call_llm, trigger_reason = should_trigger_llm(
+            self, game_state, Q_values, top_3_actions,
+            bomb_radius_data=bomb_radius_data,
+            plant_bomb_data=plant_bomb_data
+        )
 
-                # LLM helper features
-                "valid_movement": json.dumps(valid_movement),
-                "nearest_crate": json.dumps(nearest_crate),
-                "check_bomb_radius": json.dumps(bomb_radius_data),
-                "plant_bomb_available": json.dumps(plant_bomb_data),
-                "coins_collection_policy": json.dumps(coins_collection_data),
-                "movement_history": json.dumps(self.movement_history[-5:]),
-                "opponents": json.dumps(opponents_analysis),
-            }
+        if should_call_llm:
+            self.logger.info(f"🎯 LLM TRIGGERED: {trigger_reason}")
 
-            headers = {'Content-Type': 'application/json'}
-            response = requests.post(BOMBERMAN_AGENT_ENDPOINT,
-                                    headers=headers,
-                                    json=payload,
-                                    timeout=LLM_TIMEOUT)
-            results = response.json()
+            try:
+                payload = {
+                    # NEW: Maverick's recommendations
+                    "maverick_top_actions": json.dumps(top_3_actions),
+                    "maverick_features": json.dumps(features.squeeze().tolist()),
+                    "maverick_best_action": maverick_best_action,
 
-            final_action = results.get("action", maverick_best_action)
-            reasoning = results.get("reasoning", "No reasoning provided")
+                    # LLM helper features
+                    "valid_movement": json.dumps(valid_movement),
+                    "nearest_crate": json.dumps(nearest_crate),
+                    "check_bomb_radius": json.dumps(bomb_radius_data),
+                    "plant_bomb_available": json.dumps(plant_bomb_data),
+                    "coins_collection_policy": json.dumps(coins_collection_data),
+                    "movement_history": json.dumps(self.movement_history[-5:]),
+                    "opponents": json.dumps(opponents_analysis),
 
-            self.logger.info(f"LLM Decision: {final_action} (Maverick suggested: {maverick_best_action})")
-            self.logger.info(f"LLM Reasoning: {reasoning}")
+                    # Add trigger context
+                    "trigger_reason": trigger_reason,
+                }
 
-            # Track movement history
+                headers = {'Content-Type': 'application/json'}
+                response = requests.post(BOMBERMAN_AGENT_ENDPOINT,
+                                        headers=headers,
+                                        json=payload,
+                                        timeout=LLM_TIMEOUT)
+                results = response.json()
+                
+                final_action = results.get("action", maverick_best_action)
+                reasoning = results.get("reasoning", "No reasoning provided")
+
+                self.logger.info(f"✨ LLM Decision: {final_action} (Maverick: {maverick_best_action})")
+                self.logger.info(f"💭 LLM Reasoning: {reasoning}")
+
+                # Track movement history
+                self.movement_history.append({
+                    "action": final_action,
+                    "reasoning": reasoning,
+                    "maverick_suggestion": maverick_best_action,
+                    "llm_triggered": True,
+                    "trigger_reason": trigger_reason
+                })
+
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                self.logger.warning(f"⚠️ LLM server unavailable: {e}. Using Maverick fallback.")
+                self.llm_available = False
+                final_action = maverick_best_action
+            except Exception as e:
+                self.logger.error(f"❌ LLM error: {e}. Using Maverick fallback.")
+                final_action = maverick_best_action
+        else:
+            # LLM not needed - Maverick is confident
+            self.logger.debug(f"⚡ Maverick confident: {maverick_best_action} (Q={Q_values.max():.2f})")
+            final_action = maverick_best_action
+
+            # Track non-LLM decision for action history
             self.movement_history.append({
                 "action": final_action,
-                "reasoning": reasoning,
-                "maverick_suggestion": maverick_best_action
+                "reasoning": "Maverick confident decision",
+                "maverick_suggestion": maverick_best_action,
+                "llm_triggered": False
             })
-
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            self.logger.warning(f"LLM server unavailable: {e}. Using Maverick fallback.")
-            self.llm_available = False
-            final_action = maverick_best_action
-        except Exception as e:
-            self.logger.error(f"LLM error: {e}. Using Maverick fallback.")
-            final_action = maverick_best_action
     else:
         self.logger.info(f"Waehle Aktion {maverick_best_action} nach dem Hardmax der Q-Funktion")
         final_action = maverick_best_action
@@ -243,6 +282,14 @@ def act(self, game_state: dict) -> str:
 
         if opp_pos:
             self.opponent_histories[opp_name].append(opp_pos)
+
+    # STEP 6: Track action for behavioral loop detection
+    if hasattr(self, 'action_history'):
+        self.action_history.append(final_action)
+
+    # Log LLM trigger statistics every 50 steps
+    if hasattr(self, 'total_steps') and self.total_steps % 50 == 0:
+        log_llm_trigger_stats(self, self.logger)
 
     return final_action
 
@@ -283,5 +330,12 @@ def _end_episode_from_act(self, game_state):
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: list):
     """Called at the end of each round during play mode."""
+    # Log final LLM trigger statistics for this episode
+    if hasattr(self, 'logger'):
+        log_llm_trigger_stats(self, self.logger)
+
+    # Reset trigger stats for next episode
+    reset_trigger_stats(self)
+
     if hasattr(self, 'episode_active') and self.episode_active:
         _end_episode_from_act(self, last_game_state)

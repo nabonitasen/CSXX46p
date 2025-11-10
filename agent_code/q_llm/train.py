@@ -76,7 +76,7 @@ def setup_training(self):
     self.llm_reward_bonus = 0.0  # DISABLED for fair comparison
 
     # === Metrics tracking ===
-    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="metrics")
+    self.metrics_tracker = MetricsTracker(agent_name=self.name, save_dir="evaluation_metrics")
 
     self.logger.info("Hybrid training setup complete.")
     self.logger.info(f"Initial epsilon: {self.epsilon:.3f}")
@@ -137,6 +137,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str,
             self.metrics_tracker.record_event(event_name)
             self.logger.debug(f"Recorded event: {event_name}")
 
+        # Record action
+        self.metrics_tracker.record_action(self_action)
+        self.logger.debug(f"Recorded action: {self_action}")
+
         # Verify recording
         if hasattr(self.metrics_tracker.current_episode, 'events'):
             total_events = len(self.metrics_tracker.current_episode.events)
@@ -164,6 +168,14 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: list):
 
     # === Add custom events ===
     events = add_custom_events(last_game_state, None, events, last_action)
+
+    # === Record final events and action ===
+    if hasattr(self, "metrics_tracker") and self.metrics_tracker.current_episode:
+        for event in events:
+            event_name = event if isinstance(event, str) else getattr(event, 'name', str(event))
+            self.metrics_tracker.record_event(event_name)
+        if last_action:
+            self.metrics_tracker.record_action(last_action)
 
     # === Final reward ===
     reward = reward_from_events(self, events)
@@ -281,9 +293,21 @@ def update_q_value(self, state, action, reward, next_state):
 
 def reward_from_events(self, events: List) -> float:
     """
-    SYNCHRONIZED with q_learning for fair comparison.
-    Balanced reward shaping for both coin-collection AND crate-destruction gameplay.
+    Use standardized evaluation rewards when not in training mode.
+    Falls back to training rewards during training.
     """
+    # Use standardized evaluation rewards for fair comparison
+    if not self.train:
+        try:
+            from evaluation_rewards import EVALUATION_REWARDS
+            reward_sum = 0.0
+            for ev in events:
+                reward_sum += EVALUATION_REWARDS.get(ev, 0.0)
+            return reward_sum
+        except ImportError:
+            pass
+
+    # Training rewards (synchronized with q_learning)
     game_rewards = {
         # PRIMARY GOALS - High positive rewards
         e.COIN_COLLECTED: 25.0,           # Main objective (SYNC with q_learning)
